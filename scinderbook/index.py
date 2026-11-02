@@ -8,12 +8,26 @@
 
 from __future__ import annotations
 
+import functools
 import sqlite3
+import threading
 from pathlib import Path
 
 from .entry import Entry
 from .semantic import pack_vector, rank_by_vector
 from .tokenize import fts5_query, tokenize
+
+
+def _locked(func):
+    """所有碰连接的方法都串行化：重建可能在 asyncio.to_thread 里跑，
+    召回却在事件循环线程里跑，同一个连接必须能跨线程用。"""
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return func(self, *args, **kwargs)
+
+    return wrapper
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
@@ -44,13 +58,18 @@ class ScinderBookIndex:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._lock = threading.RLock()
+        # check_same_thread=False：连接可能在 to_thread 的工作线程里建，
+        # 之后由事件循环线程查询；并发由 self._lock 串行化。
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.executescript(_SCHEMA)
+            self._conn.commit()
 
     # ---------- 构建 ----------
 
+    @_locked
     def _reset_fts(self) -> None:
         """清空 FTS 倒排。
 
@@ -66,6 +85,7 @@ class ScinderBookIndex:
                 "USING fts5(tokens, content='', contentless_delete=1, tokenize='unicode61')"
             )
 
+    @_locked
     def rebuild(self, entries: list[Entry]) -> dict[str, int]:
         """全量重建索引；同时清掉旧的向量（语义兜底需要重新算）。"""
         conn = self._conn
@@ -100,6 +120,7 @@ class ScinderBookIndex:
 
     # ---------- 语义兜底（可选） ----------
 
+    @_locked
     def embedding_candidates(self, max_chars: int = 512) -> list[tuple[int, str]]:
         """返回 [(entry_id, 用于 embedding 的文本)]。
 
@@ -110,6 +131,7 @@ class ScinderBookIndex:
         ).fetchall()
         return [(int(rowid), str(body)[:max_chars]) for rowid, body in rows if body]
 
+    @_locked
     def set_embeddings(self, vectors: list[tuple[int, list[float]]]) -> int:
         """写入向量，返回写入条数。"""
         conn = self._conn
@@ -124,15 +146,18 @@ class ScinderBookIndex:
         conn.commit()
         return len(vectors)
 
+    @_locked
     def embeddings_count(self) -> int:
         return int(
             self._conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
         )
 
+    @_locked
     def get_vector_dim(self) -> int:
         row = self._conn.execute("SELECT dim FROM embeddings LIMIT 1").fetchone()
         return int(row[0]) if row else 0
 
+    @_locked
     def semantic_search(
         self,
         query_vec: list[float],
@@ -165,6 +190,7 @@ class ScinderBookIndex:
 
     # ---------- 查询 ----------
 
+    @_locked
     def _always_entries(self) -> list[Entry]:
         rows = self._conn.execute(
             "SELECT rel_path, title, keywords, body, always FROM entries WHERE always=1"
@@ -182,6 +208,7 @@ class ScinderBookIndex:
             always=bool(always),
         )
 
+    @_locked
     def search(
         self,
         query: str,
@@ -247,6 +274,7 @@ class ScinderBookIndex:
 
     # ---------- 统计 ----------
 
+    @_locked
     def stats(self) -> dict[str, int]:
         count = self._conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
         always = self._conn.execute(
@@ -266,6 +294,7 @@ class ScinderBookIndex:
             "chars": int(chars),
         }
 
+    @_locked
     def close(self) -> None:
         try:
             self._conn.close()
