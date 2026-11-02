@@ -1,4 +1,4 @@
-"""KWBook —— 检索词与正文分离的两段式词条注入。
+"""ScinderBook —— 检索词与正文分离的两段式词条注入。
 
 核心思路：
 1. 词条文件里，第一行（标题下）只放检索词，其余是正文；
@@ -18,22 +18,22 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
-from .kwbook import KwBookIndex, scan_dir
+from .scinderbook import ScinderBookIndex, scan_dir
 
-PLUGIN_ID = "astrbot_plugin_kwbook"
+PLUGIN_ID = "astrbot_plugin_scinderbook"
 INJECT_HEADER = (
-    "<kwbook>\n"
+    "<scinderbook>\n"
     "以下是命中的设定词条，按需使用，不要整段复述，也不要提到「词条」「知识库」这些字眼。\n"
 )
-INJECT_FOOTER = "\n</kwbook>"
+INJECT_FOOTER = "\n</scinderbook>"
 
 
 @register(PLUGIN_ID, "YuJieABN", "检索词与正文分离的两段式词条注入", "v0.1.0")
-class KwBookPlugin(Star):
+class ScinderBookPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None) -> None:
         super().__init__(context)
         self.cfg: dict = dict(config or {})
-        self._index: KwBookIndex | None = None
+        self._index: ScinderBookIndex | None = None
         self._built_at = 0.0
         self._lock = asyncio.Lock()
         self._hits = 0
@@ -79,7 +79,7 @@ class KwBookPlugin(Star):
             root = self.vault_dir
             if root is None:
                 logger.warning(
-                    "[kwbook] 未配置有效的 vault_dir（当前：%r），索引未构建",
+                    "[scinderbook] 未配置有效的 vault_dir（当前：%r），索引未构建",
                     self._c("vault_dir", ""),
                 )
                 return {"entries": 0}
@@ -89,12 +89,12 @@ class KwBookPlugin(Star):
 
             def _work() -> dict[str, int]:
                 entries, failed = scan_dir(root, mode=mode, always_files=always)
-                index = KwBookIndex(self.db_path)
+                index = ScinderBookIndex(self.db_path)
                 stats = index.rebuild(entries)
                 self._index = index
                 if failed:
                     logger.warning(
-                        "[kwbook] %d 个文件解析失败或被跳过：%s",
+                        "[scinderbook] %d 个文件解析失败或被跳过：%s",
                         len(failed),
                         ", ".join(failed[:5]),
                     )
@@ -104,7 +104,7 @@ class KwBookPlugin(Star):
             stats = await asyncio.to_thread(_work)
             self._built_at = time.monotonic()
             logger.info(
-                "[kwbook] 索引%s完成：%d 个词条，用时 %.2fs，库=%s",
+                "[scinderbook] 索引%s完成：%d 个词条，用时 %.2fs，库=%s",
                 "重建" if reason == "manual" else "构建",
                 stats.get("entries", 0),
                 self._built_at - started,
@@ -112,7 +112,7 @@ class KwBookPlugin(Star):
             )
             return stats
 
-    async def _ensure_index(self) -> KwBookIndex | None:
+    async def _ensure_index(self) -> ScinderBookIndex | None:
         if self._index is None:
             await self._rebuild(reason="lazy")
         interval = int(self._c("rebuild_interval_min", 0) or 0)
@@ -166,7 +166,7 @@ class KwBookPlugin(Star):
                 max_chars=int(self._c("max_chars", 1500) or 1500),
             )
         except Exception as exc:  # noqa: BLE001
-            logger.error("[kwbook] 检索失败：%s", exc)
+            logger.error("[scinderbook] 检索失败：%s", exc)
             return
 
         if not hits:
@@ -178,7 +178,7 @@ class KwBookPlugin(Star):
         self._injected += len(hits)
         if bool(self._c("debug", False)):
             logger.info(
-                "[kwbook] 命中 %d 条：%s",
+                "[scinderbook] 命中 %d 条：%s",
                 len(hits),
                 ", ".join(f"{e.title}({score:.1f})" for score, e in hits),
             )
