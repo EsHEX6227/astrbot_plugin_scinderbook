@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kwbook.entry import parse_entry  # noqa: E402
+from scinderbook.entry import parse_entry  # noqa: E402
 
 
 def test_simple_format() -> None:

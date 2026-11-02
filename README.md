@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="logo.png" width="112" alt="KWBook"/>
+<img src="logo.png" width="112" alt="ScinderBook"/>
 
-# 关键词词条本 · KWBook
+# ScinderBook · 关键词词条本
 
 **检索词只用于命中，正文才进入上下文。零 embedding、零网络请求。**
 
@@ -53,7 +53,7 @@ AstrBot 插件 · 核心约 500 行（含注释）· MIT
 - 「看 观看 视觉 视力 看见 视」这种词表被当成正文的一部分参与相似度
 - 分数被压平：实测 nomic-embed-text 上，「消息抖动是什么」这条查询最相似的是「Kn触觉」（0.754），正确的条目根本进不了前三
 
-KWBook 的解法是把两件事彻底分开：
+ScinderBook 的解法是把两件事彻底分开：
 
 ```
 词条目录 (.md)
@@ -116,7 +116,7 @@ always: true
 
 ```bash
 cd AstrBot/data/plugins
-git clone <本仓库地址> astrbot_plugin_kwbook
+git clone <本仓库地址> astrbot_plugin_scinderbook
 ```
 
 重启 AstrBot → 插件页启用 → 插件配置里填 `vault_dir`。
@@ -153,7 +153,7 @@ git clone <本仓库地址> astrbot_plugin_kwbook
 
 27 条词条（6359 字正文）、索引构建 0.57 秒：
 
-| 查询 | nomic-embed-text（768） | bge-m3（1024） | KWBook |
+| 查询 | nomic-embed-text（768） | bge-m3（1024） | ScinderBook |
 |---|---|---|---|
 | 你能看见吗 | ❌ Kn触觉 0.737 | — | ✅ **Kn视力** 6.83 |
 | 消息抖动是什么 | ❌ Kn触觉 0.754 | ✅ Kn消息抖动 | ✅ **Kn消息抖动** 8.31 |
@@ -161,7 +161,7 @@ git clone <本仓库地址> astrbot_plugin_kwbook
 | 我没有触觉吗 | ✅ Kn触觉 0.671（次名 0.650） | ✅ Kn触觉 0.704（次名 0.517） | ✅ **Kn触觉** 4.34 |
 | 京海市在哪（库里没有） | 硬凑 top-1 | 硬凑 top-1 | ✅ **无命中** |
 
-最后一行是关键差异：向量检索永远会返回 top-k，KWBook 在库里没有时明确不注入。
+最后一行是关键差异：向量检索永远会返回 top-k，ScinderBook 在库里没有时明确不注入。
 
 ## 设计取舍
 
@@ -185,7 +185,7 @@ git clone <本仓库地址> astrbot_plugin_kwbook
 能。非中文按空格/字符边界切，FTS5 的 unicode61 分词器处理拉丁文字没问题；只是混合中英时召回质量取决于 jieba。
 
 **Q：和 AstrBot 原生知识库冲突吗？**
-不冲突。原生知识库的自动注入照常，KWBook 只是额外补一段词条正文。如果两套都开、又都命中同一条，建议把该条从其中一边删掉。
+不冲突。原生知识库的自动注入照常，ScinderBook 只是额外补一段词条正文。如果两套都开、又都命中同一条，建议把该条从其中一边删掉。
 
 **Q：常驻词条会不会把上下文吃满？**
 `max_chars` 是硬上限，常驻条目同样受它约束。放太多会挤掉命中条目，建议常驻只放一两条全局基调。

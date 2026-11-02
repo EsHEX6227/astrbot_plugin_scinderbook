@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kwbook.entry import scan_dir  # noqa: E402
-from kwbook.index import KwBookIndex  # noqa: E402
+from scinderbook.entry import scan_dir  # noqa: E402
+from scinderbook.index import ScinderBookIndex  # noqa: E402
 
 FILES = {
     "Kn触觉.md": "# Kn触觉\n触觉 摸 感觉到\n你没有触觉。当且仅当在亲热环节时，你可以表述你的触觉。\n",
@@ -20,7 +20,7 @@ FILES = {
 
 
 def _make_vault() -> Path:
-    root = Path(tempfile.mkdtemp(prefix="kwbook_"))
+    root = Path(tempfile.mkdtemp(prefix="scinderbook_"))
     for name, text in FILES.items():
         (root / name).write_text(text, encoding="utf-8")
     return root
@@ -32,7 +32,7 @@ def test_build_and_search() -> None:
     assert not failed, failed
     assert len(entries) == 4
 
-    index = KwBookIndex(Path(tempfile.mkdtemp(prefix="kwbook_idx_")) / "i.sqlite")
+    index = ScinderBookIndex(Path(tempfile.mkdtemp(prefix="scinderbook_idx_")) / "i.sqlite")
     stats = index.rebuild(entries)
     assert stats["entries"] == 4
 
@@ -52,7 +52,7 @@ def test_build_and_search() -> None:
 def test_no_embedding_and_no_keywords_in_body() -> None:
     root = _make_vault()
     entries, _ = scan_dir(root)
-    index = KwBookIndex(Path(tempfile.mkdtemp(prefix="kwbook_idx_")) / "i.sqlite")
+    index = ScinderBookIndex(Path(tempfile.mkdtemp(prefix="scinderbook_idx_")) / "i.sqlite")
     index.rebuild(entries)
     hits = index.search("触觉", top_n=1)
     rendered = hits[0][1].render()

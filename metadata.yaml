@@ -1,5 +1,5 @@
-name: astrbot_plugin_kwbook
-display_name: 关键词词条本 (KWBook)
+name: astrbot_plugin_scinderbook
+display_name: ScinderBook
 desc: 检索词与正文分离的两段式词条注入。用关键词索引命中条目，只把正文注入上下文，不调用任何 embedding。
 short_desc: 关键词召回、正文注入，零 embedding。
 version: v0.1.0

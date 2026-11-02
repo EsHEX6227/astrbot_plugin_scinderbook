@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 _EXACT_BONUS = 3.0
 
 
-class KwBookIndex:
+class ScinderBookIndex:
     """一个目录对应一个索引文件。"""
 
     def __init__(self, db_path: Path | str) -> None:
