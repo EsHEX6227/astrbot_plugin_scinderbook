@@ -42,10 +42,13 @@
     "hint": "user_tail：作为本轮临时内容附在对话尾部（推荐，不破坏 KV 前缀）；system_prompt：拼进系统提示词（会打断前缀缓存）。"
   },
   "always_files": {
-    "description": "常驻词条（文件名列表）",
+    "description": "常驻词条（文件名 / 相对路径 / 条目名都可以）",
     "type": "list",
+    "items": {
+      "type": "string"
+    },
     "default": [],
-    "hint": "这些文件无论是否命中都会注入，适合放全局基调，例如 [\"Kn郁洁背景.md\"]。"
+    "hint": "这里的条目每轮都会无条件注入，不需要召回词。写 Kn背景、Kn背景.md、sub/Kn背景.md 都行，例如 [\"Kn郁洁背景\", \"基调\"]. 另一种更直观的做法：在插件管理页里勾「常驻注入」，它会把 always: true 写进那个 md 的 frontmatter，效果完全一样；配置页这个列表是给「不想改文件」的场合用的。"
   },
   "rebuild_interval_min": {
     "description": "自动重建索引的间隔（分钟）",

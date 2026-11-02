@@ -154,20 +154,46 @@ def _extract_title_and_body(rest: str, fallback_title: str) -> tuple[str, str]:
 
 
 def entry_blockers(entry: Entry) -> list[str]:
-    """返回「让这条词条不可召回」的原因代码，空列表表示可用。
+    """返回「让这条词条不可用」的原因代码，空列表表示可用。
 
     这条规则同时被索引构建和管理页使用：
-    - 没有召回词：没有任何入口能命中它，只能靠正文分词瞎撞，等于不可控
+    - 没有召回词、且不是常驻：没有任何入口能命中它，等于不可控
     - 正文为空：命中了也没有内容可注入
 
-    缺 `# 标题`、文件名与条目名不一致这类问题只影响展示，不阻断召回。
+    常驻词条（`always: true` 或 `always_files` 里列了它）不需要召回词，
+    它每轮都被无条件注入；缺 `# 标题`、文件名与条目名不一致这类问题只影响展示。
     """
     problems: list[str] = []
-    if not entry.keywords:
+    if not entry.always and not entry.keywords:
         problems.append("no_keywords")
     if not entry.body.strip():
         problems.append("empty_body")
     return problems
+
+
+def normalize_always(values: list[str] | None) -> set[str]:
+    """把 always_files 配置摊平成一堆可比较的键。
+
+    允许用户随手写：`Kn背景`、`Kn背景.md`、`sub/Kn背景.md` 都算数。
+    """
+    keys: set[str] = set()
+    for value in values or []:
+        raw = str(value or "").strip().replace("\\", "/").lower()
+        if not raw:
+            continue
+        keys.add(raw)
+        bare = raw[:-3] if raw.endswith(".md") else raw
+        keys.add(bare)
+        keys.add(raw.rsplit("/", 1)[-1])
+        keys.add(bare.rsplit("/", 1)[-1])
+    return keys
+
+
+def matches_always(rel_path: str, title: str, keys: set[str]) -> bool:
+    """相对路径、文件名、条目名任一命中就算常驻。"""
+    if not keys:
+        return False
+    return bool(normalize_always([rel_path, title]) & keys)
 
 
 def parse_entry(raw: str, rel_path: str, mode: str = "auto") -> Entry:
@@ -220,7 +246,7 @@ def scan_dir(
     always_files: list[str] | None = None,
 ) -> tuple[list[Entry], list[str]]:
     """递归扫描目录下所有 .md，返回 (词条列表, 解析失败的相对路径)。"""
-    always_set = {str(name).strip() for name in (always_files or []) if str(name).strip()}
+    always_keys = normalize_always(always_files)
     entries: list[Entry] = []
     failed: list[str] = []
     root = Path(root)
@@ -239,7 +265,7 @@ def scan_dir(
         except Exception:  # noqa: BLE001 - 单个文件坏掉不能拖垮整次扫描
             failed.append(rel)
             continue
-        entry.always = entry.always or rel in always_set or path.name in always_set
+        entry.always = entry.always or matches_always(rel, entry.title, always_keys)
         if entry.body:
             entries.append(entry)
         else:

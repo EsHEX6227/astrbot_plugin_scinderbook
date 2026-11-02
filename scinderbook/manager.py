@@ -10,7 +10,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .entry import _looks_like_keyword_line, _normalize_keyword, _split_frontmatter, parse_entry
+from .entry import (
+    _looks_like_keyword_line,
+    _normalize_keyword,
+    _split_frontmatter,
+    matches_always,
+    normalize_always,
+    parse_entry,
+)
 
 _SAFE_REL = re.compile(r"^[\w\u4e00-\u9fff\-./ ]+\.md$", re.UNICODE)
 _FILENAME_BAD = re.compile(r'[\\/:*?"<>|\r\n\t]')
@@ -105,7 +112,11 @@ class Catalog:
         self.root = Path(root)
         self.mode = mode or "auto"
         self.always_files = [str(x) for x in (always_files or [])]
+        self.always_keys = normalize_always(self.always_files)
         self.max_chars = max(1, int(max_chars))
+
+    def _is_always(self, rel_path: str, title: str, entry_always: bool) -> bool:
+        return entry_always or matches_always(rel_path, title, self.always_keys)
 
     # ---------- 路径安全 ----------
 
@@ -123,10 +134,12 @@ class Catalog:
 
     # ---------- 体检 ----------
 
-    def _audit(self, rel_path: str, raw: str, title: str) -> list[Issue]:
+    def _audit(self, rel_path: str, raw: str, entry=None) -> list[Issue]:
         issues: list[Issue] = []
         meta, rest = _split_frontmatter(raw)
-        entry = parse_entry(raw, rel_path, mode=self.mode)
+        if entry is None:
+            entry = parse_entry(raw, rel_path, mode=self.mode)
+        always = self._is_always(rel_path, entry.title, entry.always)
 
         has_heading = any(
             line.strip().startswith("# ") for line in rest.splitlines()[:5]
@@ -134,7 +147,8 @@ class Catalog:
         if not has_heading:
             issues.append(Issue("no_heading", "首行不是 `# 标题`，条目名取自文件名"))
 
-        if not entry.keywords:
+        # 常驻词条不需要召回词：它每轮都注入，少了词表也照样生效
+        if not entry.keywords and not always:
             first = next(
                 (line.strip() for line in entry.body.splitlines() if line.strip()), ""
             )
@@ -180,13 +194,13 @@ class Catalog:
                 raw = path.read_text(encoding="utf-8", errors="replace")
                 entry = parse_entry(raw, rel, mode=self.mode)
                 mtime = path.stat().st_mtime
-                issues = self._audit(rel, raw, entry.title)
+                issues = self._audit(rel, raw, entry)
                 items.append(
                     EntryInfo(
                         rel_path=rel,
                         title=entry.title,
                         keywords=entry.keywords,
-                        always=entry.always or path.name in self.always_files,
+                        always=self._is_always(rel, entry.title, entry.always),
                         body_len=len(entry.body),
                         mtime=mtime,
                         issues=issues,
@@ -212,13 +226,13 @@ class Catalog:
             raise FileNotFoundError(rel_path)
         raw = path.read_text(encoding="utf-8", errors="replace")
         entry = parse_entry(raw, rel_path, mode=self.mode)
-        issues = self._audit(rel_path, raw, entry.title)
+        issues = self._audit(rel_path, raw, entry)
         data = {
             "path": rel_path,
             "title": entry.title,
             "keywords": entry.keywords,
             "body": entry.body,
-            "always": entry.always or path.name in self.always_files,
+            "always": self._is_always(rel_path, entry.title, entry.always),
             "mtime": path.stat().st_mtime,
             "issues": [i.to_dict() for i in issues],
             "level": worst_level(issues),
@@ -323,7 +337,10 @@ class Catalog:
                 continue
 
             rel = target.relative_to(self.root).as_posix()
-            issues = self._audit(rel, target.read_text(encoding="utf-8"), entry.title)
+            written = parse_entry(
+                target.read_text(encoding="utf-8"), rel, mode=self.mode
+            )
+            issues = self._audit(rel, target.read_text(encoding="utf-8"), written)
             imported.append(
                 {
                     "path": rel,
@@ -354,6 +371,49 @@ class Catalog:
         if target != root and root not in target.parents:
             raise ValueError(f"目录越界：{folder!r}")
         return target
+
+    def list_folders(self) -> list[str]:
+        """目录下所有子文件夹的相对路径（含空的，已排序）。"""
+        if not self.root.is_dir():
+            return []
+        out: list[str] = []
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_dir():
+                continue
+            rel = path.relative_to(self.root)
+            parts = rel.parts
+            if any(part.startswith(".") for part in parts):
+                continue
+            out.append(rel.as_posix())
+        return out
+
+    def create_folder(self, name: str, folder: str = "") -> str:
+        """在 folder 下新建文件夹；name 可以带 `/` 建多级。返回相对路径。"""
+        raw = (name or "").strip().replace("\\", "/")
+        if not raw:
+            raise ValueError("文件夹名不能为空")
+        if raw.startswith("/") or ".." in raw.split("/"):
+            raise ValueError(f"非法的文件夹名：{name!r}")
+        raw = raw.strip("/")
+        parts = [part.strip() for part in raw.split("/") if part.strip()]
+        if not parts:
+            raise ValueError("文件夹名不能为空")
+        for part in parts:
+            if part in {".", ".."} or set(part) <= {"."}:
+                raise ValueError(f"非法的文件夹名：{name!r}")
+            if any(ch in part for ch in '<>:"|?*'):
+                raise ValueError(f"文件夹名里有非法字符：{part!r}")
+        base = self._safe_folder(folder)
+        target = base.joinpath(*parts)
+        root = self.root.resolve()
+        resolved = target.resolve()
+        if resolved != root and root not in resolved.parents:
+            raise ValueError(f"目录越界：{name!r}")
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ValueError(f"新建文件夹失败：{exc}") from exc
+        return resolved.relative_to(root).as_posix()
 
     # ---------- 辅助 ----------
 
