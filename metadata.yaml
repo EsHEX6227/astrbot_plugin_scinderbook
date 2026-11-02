@@ -2,7 +2,7 @@ name: astrbot_plugin_scinderbook
 display_name: ScinderBook
 desc: 检索词与正文分离的两段式词条注入。用关键词索引命中条目，只把正文注入上下文，不调用任何 embedding。（AI 生成项目，使用前请自行审查）
 short_desc: 关键词召回、正文注入，零 embedding。
-version: v0.1.0
+version: v0.2.0
 author: YuJieABN
 repo: https://github.com/EsHEX6227/astrbot_plugin_scinderbook
 astrbot_version: ">=4.23,<5"

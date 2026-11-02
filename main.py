@@ -38,6 +38,7 @@ class ScinderBookPlugin(Star):
         self._lock = asyncio.Lock()
         self._hits = 0
         self._injected = 0
+        self._vec_cache: dict[str, list[float]] = {}
 
     # ---------------- 配置 ----------------
 
@@ -110,7 +111,75 @@ class ScinderBookPlugin(Star):
                 self._built_at - started,
                 root,
             )
+            await self._rebuild_embeddings()
             return stats
+
+    # ---------------- 语义兜底（可选） ----------------
+
+    def _embed_provider(self):
+        pid = str(self._c("embedding_provider_id", "") or "").strip()
+        if not pid:
+            return None
+        prov = self.context.get_provider_by_id(pid)
+        if prov is None:
+            logger.warning("[scinderbook] 找不到嵌入提供商 %s，语义兜底停用", pid)
+            return None
+        if not hasattr(prov, "get_embedding"):
+            logger.warning("[scinderbook] %s 不是嵌入提供商，语义兜底停用", pid)
+            return None
+        return prov
+
+    @property
+    def _semantic_on(self) -> bool:
+        return bool(self._c("semantic_enabled", False)) and self._embed_provider() is not None
+
+    async def _rebuild_embeddings(self) -> None:
+        if not bool(self._c("semantic_enabled", False)):
+            return
+        prov = self._embed_provider()
+        index = self._index
+        if prov is None or index is None:
+            return
+        max_chars = int(self._c("semantic_max_chars", 512) or 512)
+        try:
+            candidates = index.embedding_candidates(max_chars=max_chars)
+            if not candidates:
+                return
+            texts = [text for _, text in candidates]
+            if hasattr(prov, "get_embeddings_batch"):
+                vectors = await prov.get_embeddings_batch(texts)
+            else:
+                vectors = await prov.get_embeddings(texts)
+            rows = [
+                (entry_id, vec)
+                for (entry_id, _), vec in zip(candidates, vectors)
+                if vec
+            ]
+            count = await asyncio.to_thread(index.set_embeddings, rows)
+            logger.info(
+                "[scinderbook] 语义兜底就绪：%d 条向量，维度 %d",
+                count,
+                index.get_vector_dim(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[scinderbook] 构建向量失败，语义兜底本次不可用：%s", exc)
+
+    async def _query_vector(self, query: str) -> list[float]:
+        cached = self._vec_cache.get(query)
+        if cached is not None:
+            return cached
+        prov = self._embed_provider()
+        if prov is None:
+            return []
+        try:
+            vec = await prov.get_embedding(query)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[scinderbook] 查询向量化失败：%s", exc)
+            return []
+        if len(self._vec_cache) >= 64:
+            self._vec_cache.clear()
+        self._vec_cache[query] = vec
+        return vec
 
     async def _ensure_index(self) -> ScinderBookIndex | None:
         if self._index is None:
@@ -159,12 +228,41 @@ class ScinderBookPlugin(Star):
             return
 
         try:
+            top_n = int(self._c("top_n", 3) or 3)
+            max_chars = int(self._c("max_chars", 1500) or 1500)
             hits = index.search(
                 query,
-                top_n=int(self._c("top_n", 3) or 3),
+                top_n=top_n,
                 min_score=float(self._c("min_score", 0.0) or 0.0),
-                max_chars=int(self._c("max_chars", 1500) or 1500),
+                max_chars=max_chars,
             )
+            # 语义兜底：关键词优先；但关键词只是弱命中时，让位给向量
+            if self._semantic_on:
+                override = float(self._c("semantic_override_score", 3.0) or 0.0)
+                lex_best = max((score for score, _ in hits), default=0.0)
+                weak_lexical = bool(hits) and override > 0 and lex_best < override
+                if weak_lexical:
+                    logger.debug(
+                        "[scinderbook] 词法最高分 %.2f < %.2f，让位给向量",
+                        lex_best,
+                        override,
+                    )
+                    hits = []
+                if len(hits) < top_n:
+                    vec = await self._query_vector(query)
+                    if vec:
+                        seen = {entry.rel_path for _, entry in hits}
+                        for sim, entry in index.semantic_search(
+                            vec,
+                            top_n=int(self._c("semantic_top_n", 3) or 3),
+                            min_sim=float(self._c("semantic_min_sim", 0.45) or 0.45),
+                        ):
+                            if len(hits) >= top_n:
+                                break
+                            if entry.rel_path in seen:
+                                continue
+                            hits.append((sim * -1.0, entry))  # 负数：表示来自向量兜底
+                            seen.add(entry.rel_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("[scinderbook] 检索失败：%s", exc)
             return
@@ -180,7 +278,10 @@ class ScinderBookPlugin(Star):
             logger.info(
                 "[scinderbook] 命中 %d 条：%s",
                 len(hits),
-                ", ".join(f"{e.title}({score:.1f})" for score, e in hits),
+                ", ".join(
+                    f"{e.title}({'语义' if score < 0 else '词法'} {abs(score):.2f})"
+                    for score, e in hits
+                ),
             )
 
     # ---------------- 指令 ----------------
@@ -204,8 +305,11 @@ class ScinderBookPlugin(Star):
 
         if sub == "reload":
             stats = await self._rebuild(reason="manual")
+            extra = ""
+            if self._index is not None and self._semantic_on:
+                extra = f"，向量 {self._index.embeddings_count()} 条"
             yield event.plain_result(
-                f"索引已重建：{stats.get('entries', 0)} 个词条"
+                f"索引已重建：{stats.get('entries', 0)} 个词条{extra}"
             )
             return
 
@@ -224,12 +328,19 @@ class ScinderBookPlugin(Star):
                 min_score=0.0,
                 max_chars=10_000,
             )
-            if not hits:
-                yield event.plain_result(f"「{query}」没有命中任何词条")
-                return
-            lines = [f"「{query}」命中 {len(hits)} 条："]
+            lines = [f"「{query}」词法命中 {len(hits)} 条："] if hits else [f"「{query}」词法无命中"]
             for score, entry in hits:
                 lines.append(f"· {entry.title}（{score:.1f}，{len(entry.body)} 字）")
+            if self._semantic_on:
+                vec = await self._query_vector(query)
+                sem = index.semantic_search(
+                    vec,
+                    top_n=int(self._c("semantic_top_n", 3) or 3),
+                    min_sim=float(self._c("semantic_min_sim", 0.45) or 0.45),
+                )
+                lines.append(f"向量兜底命中 {len(sem)} 条：")
+                for sim, entry in sem:
+                    lines.append(f"· {entry.title}（相似度 {sim:.3f}）")
             yield event.plain_result("\n".join(lines))
             return
 
@@ -238,9 +349,16 @@ class ScinderBookPlugin(Star):
             yield event.plain_result("索引未就绪：请先在插件配置里填 vault_dir")
             return
         stats = index.stats()
+        semantic_line = "语义兜底：关闭"
+        if self._semantic_on:
+            semantic_line = (
+                f"语义兜底：{self._c('embedding_provider_id')}，"
+                f"{index.embeddings_count()} 条向量 / {index.get_vector_dim()} 维"
+            )
         yield event.plain_result(
             "关键词词条本\n"
             f"词条 {stats['entries']} 条（常驻 {stats['always']} 条）\n"
             f"检索词 {stats['keywords']} 个，正文合计 {stats['chars']} 字\n"
+            f"{semantic_line}\n"
             f"本轮命中注入 {self._hits} 次 / {self._injected} 条"
         )

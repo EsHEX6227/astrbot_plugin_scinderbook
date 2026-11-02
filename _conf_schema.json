@@ -53,6 +53,41 @@
     "default": 0,
     "hint": "0 = 只在插件启动和手动 /kwb reload 时重建。"
   },
+  "semantic_enabled": {
+    "description": "启用语义兜底（可选）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭：关闭时整条链路是纯关键词，零依赖零请求。打开后需要下面填一个嵌入提供商，关键词没命中时用向量补位。"
+  },
+  "embedding_provider_id": {
+    "description": "嵌入提供商 ID",
+    "type": "string",
+    "default": "",
+    "hint": "填 AstrBot「提供商」里已配置的嵌入模型 ID，例如 ollama_bge_m3、ollama_embedding。留空或填错时语义兜底自动停用，不影响关键词召回。"
+  },
+  "semantic_min_sim": {
+    "description": "向量命中阈值（余弦）",
+    "type": "float",
+    "default": 0.45,
+    "hint": "低于该相似度不注入。bge-m3 上 0.45 大致是「有点相关」，0.55 以上才是明确相关。"
+  },
+  "semantic_top_n": {
+    "description": "向量兜底最多补几条",
+    "type": "int",
+    "default": 3
+  },
+  "semantic_max_chars": {
+    "description": "参与 embedding 的正文截断长度",
+    "type": "int",
+    "default": 512,
+    "hint": "只取正文前 N 字做向量，检索词不参与 embedding。"
+  },
+  "semantic_override_score": {
+    "description": "弱词法让位阈值",
+    "type": "float",
+    "default": 3.0,
+    "hint": "词法最高分低于该值时，忽略词法结果改用向量（避免关键词勉强命中一个错条目就把向量挡掉）。0 = 永不覆盖，严格关键词优先。"
+  },
   "debug": {
     "description": "调试日志",
     "type": "bool",

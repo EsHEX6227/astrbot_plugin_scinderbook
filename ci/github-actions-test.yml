@@ -21,3 +21,5 @@ jobs:
         run: python tests/test_entry.py
       - name: 索引与召回
         run: python tests/test_index.py
+      - name: 语义兜底
+        run: python tests/test_semantic.py

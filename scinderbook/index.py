@@ -12,6 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from .entry import Entry
+from .semantic import pack_vector, rank_by_vector
 from .tokenize import fts5_query, tokenize
 
 _SCHEMA = """
@@ -24,7 +25,12 @@ CREATE TABLE IF NOT EXISTS entries (
     always   INTEGER NOT NULL DEFAULT 0
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts
-    USING fts5(tokens, content='', tokenize='unicode61');
+    USING fts5(tokens, content='', contentless_delete=1, tokenize='unicode61');
+CREATE TABLE IF NOT EXISTS embeddings (
+    entry_id INTEGER PRIMARY KEY,
+    dim      INTEGER NOT NULL,
+    vec      BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -45,11 +51,27 @@ class ScinderBookIndex:
 
     # ---------- 构建 ----------
 
+    def _reset_fts(self) -> None:
+        """清空 FTS 倒排。
+
+        contentless 表在没声明 contentless_delete=1 时不允许 DELETE；
+        老库就是那种结构，所以这里兜底重建一次表。
+        """
+        try:
+            self._conn.execute("DELETE FROM entries_fts")
+        except sqlite3.OperationalError:
+            self._conn.execute("DROP TABLE IF EXISTS entries_fts")
+            self._conn.execute(
+                "CREATE VIRTUAL TABLE entries_fts "
+                "USING fts5(tokens, content='', contentless_delete=1, tokenize='unicode61')"
+            )
+
     def rebuild(self, entries: list[Entry]) -> dict[str, int]:
-        """全量重建索引。"""
+        """全量重建索引；同时清掉旧的向量（语义兜底需要重新算）。"""
         conn = self._conn
         conn.execute("DELETE FROM entries")
-        conn.execute("DELETE FROM entries_fts")
+        self._reset_fts()
+        conn.execute("DELETE FROM embeddings")
         for entry in entries:
             cur = conn.execute(
                 "INSERT INTO entries(rel_path, title, keywords, body, always) VALUES (?,?,?,?,?)",
@@ -75,6 +97,71 @@ class ScinderBookIndex:
         )
         conn.commit()
         return {"entries": len(entries)}
+
+    # ---------- 语义兜底（可选） ----------
+
+    def embedding_candidates(self, max_chars: int = 512) -> list[tuple[int, str]]:
+        """返回 [(entry_id, 用于 embedding 的文本)]。
+
+        故意只取正文：检索词行不参与向量，避免词表稀释语义。
+        """
+        rows = self._conn.execute(
+            "SELECT id, body FROM entries ORDER BY id"
+        ).fetchall()
+        return [(int(rowid), str(body)[:max_chars]) for rowid, body in rows if body]
+
+    def set_embeddings(self, vectors: list[tuple[int, list[float]]]) -> int:
+        """写入向量，返回写入条数。"""
+        conn = self._conn
+        conn.executemany(
+            "INSERT OR REPLACE INTO embeddings(entry_id, dim, vec) VALUES (?,?,?)",
+            [(entry_id, len(vec), pack_vector(vec)) for entry_id, vec in vectors if vec],
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('embedding_count', ?)",
+            (str(len(vectors)),),
+        )
+        conn.commit()
+        return len(vectors)
+
+    def embeddings_count(self) -> int:
+        return int(
+            self._conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+        )
+
+    def get_vector_dim(self) -> int:
+        row = self._conn.execute("SELECT dim FROM embeddings LIMIT 1").fetchone()
+        return int(row[0]) if row else 0
+
+    def semantic_search(
+        self,
+        query_vec: list[float],
+        top_n: int = 3,
+        min_sim: float = 0.45,
+    ) -> list[tuple[float, Entry]]:
+        """向量兜底召回：只在关键词没命中或没占满时使用。"""
+        if not query_vec:
+            return []
+        rows = self._conn.execute(
+            "SELECT entry_id, vec FROM embeddings"
+        ).fetchall()
+        ranked = rank_by_vector(query_vec, rows, top_n, min_sim)
+        if not ranked:
+            return []
+        ids = [entry_id for _, entry_id in ranked]
+        placeholders = ",".join("?" for _ in ids)
+        entry_rows = self._conn.execute(
+            f"SELECT id, rel_path, title, keywords, body, always FROM entries WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        by_id = {
+            int(row[0]): self._row_to_entry(row[1:]) for row in entry_rows
+        }
+        return [
+            (sim, by_id[entry_id])
+            for sim, entry_id in ranked
+            if entry_id in by_id
+        ]
 
     # ---------- 查询 ----------
 
