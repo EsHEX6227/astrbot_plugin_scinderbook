@@ -202,6 +202,13 @@ git clone <本仓库地址> astrbot_plugin_scinderbook
 - [ ] 命中阈值自适应（按命中词数量而非固定分）
 - [ ] WebUI 管理面板（词条增删改 + 索引状态）
 
+## 持续集成
+
+仓库里的 CI 模板放在 `ci/github-actions-test.yml`，没有直接放进 `.github/workflows/`：
+
+- 用 Personal Access Token 推送时，只有带 `workflow` 权限的 token 才允许写入 workflow 文件
+- 想启用 CI：把它复制成 `.github/workflows/test.yml` 再提交即可
+- 模板内容：Python 3.10 / 3.12 两个版本各跑一遍 `tests/` 下的两套单测
 ## AI 生成声明
 
 这个仓库是 AI 生成项目，不是纯人工手写：
