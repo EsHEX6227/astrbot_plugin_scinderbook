@@ -7,3 +7,6 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+# 在插件目录里直接 import astrbot 时，框架会在 cwd 生成默认数据
+/data/
