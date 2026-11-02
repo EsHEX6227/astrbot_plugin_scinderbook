@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "display_name": "ScinderBook",
+    "short_desc": "检索词与正文分离的两段式词条注入",
+    "desc": "词条第一行写召回词，其余是正文。命中只靠检索词做本地 FTS5 匹配，命中后只注入条目名与正文，检索词本身不进上下文。附 WebUI 词条管理页。"
+  },
+  "pages": {
+    "console": {
+      "title": "词条管理"
+    }
+  }
+}
