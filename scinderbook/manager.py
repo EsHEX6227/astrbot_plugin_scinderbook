@@ -29,17 +29,22 @@ class Issue:
         return {"code": self.code, "message": self.message, "level": self.level}
 
 
-# error：这条词条现在基本不可用；warn：能跑但大概率不是你想要的；info：只是提示
+# error：这条词条不会参与召回/注入（不可用）；warn：能用但大概不是你想要的；info：只是提示
 ISSUE_LEVELS = {
     "unreadable": "error",
     "empty_body": "error",
-    "no_keywords": "warn",
-    "keyword_line_skipped": "warn",
+    "no_keywords": "error",
+    "keyword_line_skipped": "error",
     "too_long": "warn",
     "title_mismatch": "warn",
     "no_heading": "info",
     "filename_mismatch": "info",
 }
+
+# 出现这些问题的词条会被索引跳过（等于「导进来了但不启用」）
+BLOCKING_CODES = frozenset(
+    {"unreadable", "empty_body", "no_keywords", "keyword_line_skipped"}
+)
 
 
 @dataclass
@@ -64,6 +69,7 @@ class EntryInfo:
             "mtime": self.mtime,
             "issues": [i.to_dict() for i in self.issues],
             "level": worst_level(self.issues),
+            "blocked": is_blocked(self.issues),
         }
 
 
@@ -79,6 +85,11 @@ def worst_level(issues: list[Issue]) -> str:
         if order.get(issue.level, 1) > order.get(level, -1):
             level = issue.level
     return level
+
+
+def is_blocked(issues: list[Issue]) -> bool:
+    """这条词条是否应该被索引跳过（导进来了，但不启用）。"""
+    return any(issue.code in BLOCKING_CODES for issue in issues)
 
 
 class Catalog:
@@ -201,6 +212,7 @@ class Catalog:
             raise FileNotFoundError(rel_path)
         raw = path.read_text(encoding="utf-8", errors="replace")
         entry = parse_entry(raw, rel_path, mode=self.mode)
+        issues = self._audit(rel_path, raw, entry.title)
         data = {
             "path": rel_path,
             "title": entry.title,
@@ -208,7 +220,9 @@ class Catalog:
             "body": entry.body,
             "always": entry.always or path.name in self.always_files,
             "mtime": path.stat().st_mtime,
-            "issues": [i.to_dict() for i in self._audit(rel_path, raw, entry.title)],
+            "issues": [i.to_dict() for i in issues],
+            "level": worst_level(issues),
+            "blocked": is_blocked(issues),
         }
         if include_raw:
             data["raw"] = raw
@@ -265,7 +279,10 @@ class Catalog:
         return self.read_entry(rel, include_raw=True)
 
     def import_files(self, files: list[dict], folder: str = "") -> dict:
-        """拖进来的 .md：格式正确就落盘（按规范重排），不对就退回并说明原因。"""
+        """拖进来的 .md：格式不对也照收，只是标成不可用（不参与召回），等用户改好。
+
+        只有「不是 md / 文件为空 / 写不进去」才退回。
+        """
         base = self._safe_folder(folder)
         imported: list[dict] = []
         rejected: list[dict] = []
@@ -287,14 +304,6 @@ class Catalog:
             except Exception:  # noqa: BLE001
                 rejected.append({"name": name, "reason": "解析失败"})
                 continue
-            if not entry.keywords:
-                rejected.append(
-                    {"name": name, "reason": "没有识别到召回词（标题下第一行不是词表）"}
-                )
-                continue
-            if not entry.body.strip():
-                rejected.append({"name": name, "reason": "正文为空"})
-                continue
 
             stem = _slug(entry.title or Path(name).stem)
             target = base / f"{stem}.md"
@@ -312,11 +321,16 @@ class Catalog:
             except OSError as exc:
                 rejected.append({"name": name, "reason": f"写入失败：{exc}"})
                 continue
+
+            rel = target.relative_to(self.root).as_posix()
+            issues = self._audit(rel, target.read_text(encoding="utf-8"), entry.title)
             imported.append(
                 {
-                    "path": target.relative_to(self.root).as_posix(),
+                    "path": rel,
                     "title": entry.title,
                     "keywords": len(entry.keywords),
+                    "blocked": is_blocked(issues),
+                    "problems": [i.code for i in issues if i.code in BLOCKING_CODES],
                 }
             )
         return {"imported": imported, "rejected": rejected}

@@ -94,6 +94,9 @@
       .row .dot.warn { background: #d97706; }
       .row .dot.bad { background: var(--warn); }
       .row .dot.idle { background: #d6d3d1; }
+      .row.blocked .name { color: var(--warn); }
+      .row.blocked .dot { background: var(--warn); }
+      .row.blocked .cnt { color: #dc8a8a; }
       .row .meta { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .row.dir .name { font-weight: 700; color: var(--ink); }
       .row.root .name { font-weight: 500; color: var(--ink-2); }
@@ -142,6 +145,13 @@
       .issue { padding: 7px 10px; border-radius: 8px; font-size: 12px; background: var(--accent-soft); color: #92400e; border: 1px solid #fde68a; }
       .issue.error { background: var(--warn-soft); color: var(--warn); border-color: #fecaca; }
       .issue.info { background: #f5f5f4; color: var(--ink-2); border-color: var(--line); }
+      .banner {
+        border: 1px solid #fecaca; background: var(--warn-soft); color: #7f1d1d;
+        border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
+      }
+      .banner b { font-size: 13px; }
+      .banner p { margin: 0; font-size: 12.5px; line-height: 1.65; }
+      .banner code { font-family: ui-monospace, "Cascadia Mono", monospace; background: #fff; padding: 0 4px; border-radius: 4px; }
       .placeholder {
         flex: 1; min-height: 220px; display: flex; flex-direction: column; gap: 8px;
         align-items: center; justify-content: center; color: var(--ink-3); font-size: 13px;
@@ -226,7 +236,7 @@
           <div class="stack" id="stack">
             <div class="placeholder">
               <div>把 .md 文件拖进来，或者在左边点一个词条</div>
-              <div style="font-size:12px">导入会按「标题 + 召回词 + 正文」重新排版，格式不对的会退回并说明原因</div>
+              <div style="font-size:12px">格式不对的也会导入，但会标红、不参与召回；点开就能看到具体问题</div>
             </div>
           </div>
         </main>
@@ -363,9 +373,9 @@
         chips.push(`<span class="chip">词条 <b>${sum.total || 0}</b></span>`);
         chips.push(`<span class="chip">召回词 <b>${sum.keywords || 0}</b></span>`);
         chips.push(`<span class="chip">正文 <b>${sum.chars || 0}</b> 字</span>`);
-        if (sum.errors) chips.push(`<span class="chip warn">待修复 <b>${sum.errors}</b></span>`);
+        if (sum.blocked) chips.push(`<span class="chip warn">不可召回 <b>${sum.blocked}</b></span>`);
         if (sum.warns) chips.push(`<span class="chip amber">待检查 <b>${sum.warns}</b></span>`);
-        if (!sum.errors && !sum.warns && sum.total) chips.push(`<span class="chip ok">格式全部正常</span>`);
+        if (!sum.blocked && !sum.warns && sum.total) chips.push(`<span class="chip ok">格式全部正常</span>`);
         if (s.configured === false) chips.push(`<span class="chip warn">未配置目录</span>`);
         chips.push(`<span class="chip">注入 <b>${s.inject_position === "system_prompt" ? "系统提示词" : "用户消息尾部"}</b></span>`);
         chips.push(`<span class="chip">语义兜底 <b>${sem.enabled ? sem.dim + "维 / " + sem.vectors + "条" : "关闭"}</b></span>`);
@@ -402,7 +412,8 @@
       }
       function fileRow(e, depth) {
         const active = state.current && state.current.path === e.path ? " active" : "";
-        return `<div class="row file${active}" data-path="${esc(e.path)}" style="margin-left:${depth * 13}px">
+        const blocked = e.blocked ? " blocked" : "";
+        return `<div class="row file${active}${blocked}" data-path="${esc(e.path)}" style="margin-left:${depth * 13}px">
           <span class="caret"></span>
           <span class="dot ${DOT[e.level] || ""}"></span>
           <span class="name">${esc(e.title)}</span>
@@ -437,7 +448,7 @@
           $("tree").innerHTML = rows.map((e) => {
             const active = state.current && state.current.path === e.path ? " active" : "";
             const folder = parentOf(e.path);
-            return `<div class="row file${active}" data-path="${esc(e.path)}">
+            return `<div class="row file${active}${e.blocked ? " blocked" : ""}" data-path="${esc(e.path)}">
               <span class="caret"></span>
               <span class="dot ${DOT[e.level] || ""}"></span>
               <span class="name">${esc(e.title)}</span>
@@ -532,7 +543,7 @@
         state.current = null;
         $("stack").innerHTML = `<div class="placeholder">
           <div>把 .md 文件拖进来，或者在左边点一个词条</div>
-          <div style="font-size:12px">导入会按「标题 + 召回词 + 正文」重新排版，格式不对的会退回并说明原因</div>
+          <div style="font-size:12px">格式不对的也会导入，但会标红、不参与召回；点开就能看到具体问题</div>
         </div>`;
         renderTree();
       }
@@ -561,11 +572,26 @@
         ).join("")}</div>`;
       }
 
+      function blockedBanner(e) {
+        if (!e.blocked) return "";
+        const why = (e.issues || []).filter((i) => i.level === "error");
+        const reasons = why.length
+          ? why.map((i) => esc(LABEL[i.code] || i.message)).join("；")
+          : "格式不符合规范";
+        return `<section class="banner">
+          <b>这条现在不会被召回，也不会注入上下文</b>
+          <p>原因：${reasons}。</p>
+          <p>文件已经导入、内容也都在下面第三栏里。把召回词补到第二栏（<code>词1 词2</code> 空格分隔即可），
+             正文留在第三栏，点保存后它才会开始参与检索和注入。</p>
+        </section>`;
+      }
+
       function renderEditor() {
         const e = state.current;
         if (!e) return;
         const kws = e.keywords || [];
         $("stack").innerHTML = `
+          ${blockedBanner(e)}
           <section class="card">
             <div class="head"><b>标题</b><span class="hint">写入 md 的 \`# 标题\`</span></div>
             <div class="field">
@@ -601,6 +627,9 @@
           <section class="card fill">
             <div class="head"><b>内容</b><span class="hint">命中后原样注入，别在这里写召回词</span></div>
             <textarea class="content" id="inBody" placeholder="要注入给模型的内容">${esc(e.body)}</textarea>
+            ${e.blocked
+              ? '<div class="hint">整篇内容都在这里（缺召回词时一行都没被吃掉）。把属于词表的那行剪到上面第二栏，剩下的留在这儿。</div>'
+              : ""}
             <div class="foot">
               <span class="hint" id="charCount">${e.body.length} 字</span>
             </div>
@@ -666,7 +695,12 @@
           });
           state.dirty = false;
           state.current = data.entry;
-          toast(`已保存，索引 ${(data.index && data.index.entries) || 0} 条`);
+          const n = (data.index && data.index.entries) || 0;
+          if (data.entry && data.entry.blocked) {
+            toast(`已保存，但这条仍不会被召回（${((data.entry.issues || []).find((i) => i.level === "error") || {}).message || "格式不符合规范"}）`, true);
+          } else {
+            toast(`已保存，索引 ${n} 条`);
+          }
           await refresh(data.entry.path);
         } catch (err) {
           toast("保存失败：" + err.message, true);
@@ -706,18 +740,23 @@
         try {
           const data = await apiPost("entry/import", { files: payload, folder: state.folder });
           const result = data.result || { imported: [], rejected: [] };
-          const okN = (result.imported || []).length;
+          const imported = result.imported || [];
           const bad = result.rejected || [];
-          if (okN) {
-            toast(`导入 ${okN} 个${bad.length ? "，退回 " + bad.length + " 个" : ""}${skipped ? "，忽略非 md " + skipped + " 个" : ""}`);
+          const pending = imported.filter((it) => it.blocked).length;
+          if (imported.length) {
+            const notes = [];
+            if (pending) notes.push(`${pending} 个待补召回词`);
+            if (bad.length) notes.push(`退回 ${bad.length} 个`);
+            if (skipped) notes.push(`忽略非 md ${skipped} 个`);
+            toast(`导入 ${imported.length} 个${notes.length ? "（" + notes.join("，") + "）" : ""}`);
           } else {
             toast(`一个都没导入：${bad[0] ? bad[0].name + " — " + bad[0].reason : "没有可导入的 md"}`, true);
           }
           if (bad.length) {
             console.warn("[scinderbook] 导入被退回：", bad);
           }
-          if (okN) state.open.add(state.folder);
-          await refresh(okN ? result.imported[0].path : undefined);
+          if (imported.length) state.open.add(state.folder);
+          await refresh(imported.length ? imported[0].path : undefined);
         } catch (err) {
           toast("导入失败：" + err.message, true);
         }

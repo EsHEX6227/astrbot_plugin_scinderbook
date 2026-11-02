@@ -115,33 +115,64 @@ def test_create_entry_in_folder() -> None:
         raise AssertionError("目录越界应当被拒绝")
 
 
-def test_import_files_accepts_good_and_rejects_bad() -> None:
+def test_import_keeps_malformed_but_marks_blocked() -> None:
     cat, root = _vault()
     result = cat.import_files(
         [
             {"name": "导入好.md", "text": "# 导入好\n\n好词 导入\n正文内容。\n"},
-            {"name": "导入坏.md", "text": "没有召回词的一整句话。\n"},
+            {"name": "导入坏.md", "text": "没有召回词的一整句话。\n第二行也还在。\n"},
             {"name": "空.md", "text": "# 空\n\n只有 词\n"},
             {"name": "不是md.txt", "text": "x"},
             {"name": "", "text": "x"},
         ],
         folder="导入",
     )
-    imported = result["imported"]
+    imported = {item["path"]: item for item in result["imported"]}
     rejected = result["rejected"]
-    assert [item["path"] for item in imported] == ["导入/导入好.md"]
-    assert imported[0]["keywords"] == 2
-    assert len(rejected) == 4
-    reasons = " ".join(item["reason"] for item in rejected)
-    assert "召回词" in reasons and "正文为空" in reasons and ".md" in reasons
-    saved = (root / "导入" / "导入好.md").read_text(encoding="utf-8")
-    assert saved.startswith("# 导入好\n")
-    assert "好词 导入" in saved
+
+    # 格式不对的也导入，只是标成 blocked；只有非 md / 空文件才退回
+    assert set(imported) == {"导入/导入好.md", "导入/导入坏.md", "导入/空.md"}
+    assert imported["导入/导入好.md"]["blocked"] is False
+    assert imported["导入/导入坏.md"]["blocked"] is True
+    assert "no_keywords" in imported["导入/导入坏.md"]["problems"]
+    assert imported["导入/空.md"]["blocked"] is True  # 正文为空
+    assert len(rejected) == 2
+
+    # 缺召回词的文件：整篇内容都留在「内容」里，一行都没被吃掉
+    bad = cat.read_entry("导入/导入坏.md")
+    assert bad["keywords"] == []
+    assert bad["blocked"] is True
+    assert "没有召回词的一整句话。" in bad["body"]
+    assert "第二行也还在。" in bad["body"]
+
     # 同名再导入一次，不能覆盖
     again = cat.import_files([{"name": "导入好.md", "text": "# 导入好\n\n好词 导入\n新正文。\n"}], folder="导入")
     assert again["imported"][0]["path"] == "导入/导入好-2.md"
     assert "新正文。" in (root / "导入" / "导入好-2.md").read_text(encoding="utf-8")
     assert "正文内容。" in (root / "导入" / "导入好.md").read_text(encoding="utf-8")
+
+
+def test_fixing_keywords_unblocks() -> None:
+    cat, _ = _vault()
+    assert cat.read_entry("Kn坏词条.md")["blocked"] is True
+    cat.save_entry(
+        "Kn坏词条.md",
+        title="Kn坏词条",
+        keywords=["视觉", "猫娘"],
+        body="补好召回词之后的正文。",
+    )
+    after = cat.read_entry("Kn坏词条.md")
+    assert after["blocked"] is False
+    assert after["keywords"] == ["视觉", "猫娘"]
+
+
+def test_entry_blockers_rule() -> None:
+    from scinderbook.entry import Entry, entry_blockers
+
+    assert entry_blockers(Entry("a.md", "A", ["看"], "正文")) == []
+    assert entry_blockers(Entry("a.md", "A", [], "正文")) == ["no_keywords"]
+    assert entry_blockers(Entry("a.md", "A", ["看"], "  ")) == ["empty_body"]
+    assert entry_blockers(Entry("a.md", "A", [], "")) == ["no_keywords", "empty_body"]
 
 
 def test_delete_entry() -> None:

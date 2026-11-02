@@ -19,6 +19,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .scinderbook import ScinderBookIndex, scan_dir
+from .scinderbook.entry import entry_blockers
 from .scinderbook.manager import Catalog
 
 PLUGIN_ID = "astrbot_plugin_scinderbook"
@@ -40,6 +41,7 @@ class ScinderBookPlugin(Star):
         self._hits = 0
         self._injected = 0
         self._vec_cache: dict[str, list[float]] = {}
+        self._blocked = 0
 
     # ---------------- 配置 ----------------
 
@@ -122,6 +124,7 @@ class ScinderBookPlugin(Star):
             "top_n": int(self._c("top_n", 3) or 3),
             "max_chars": int(self._c("max_chars", 1500) or 1500),
             "index": stats,
+            "blocked": self._blocked,
             "semantic": {
                 "enabled": self._semantic_on,
                 "provider": str(self._c("embedding_provider_id", "") or ""),
@@ -155,9 +158,15 @@ class ScinderBookPlugin(Star):
 
             def _work() -> dict[str, int]:
                 entries, failed = scan_dir(root, mode=mode, always_files=always)
+                # 缺召回词 / 正文为空的词条：文件保留，但不进索引，也不参与注入
+                usable = [e for e in entries if not entry_blockers(e)]
+                blocked = len(entries) - len(usable)
                 index = ScinderBookIndex(self.db_path)
-                stats = index.rebuild(entries)
+                stats = index.rebuild(usable)
+                stats["blocked"] = blocked
+                stats["skipped"] = len(failed)
                 self._index = index
+                self._blocked = blocked
                 if failed:
                     logger.warning(
                         "[scinderbook] %d 个文件解析失败或被跳过：%s",
@@ -170,9 +179,10 @@ class ScinderBookPlugin(Star):
             stats = await asyncio.to_thread(_work)
             self._built_at = time.monotonic()
             logger.info(
-                "[scinderbook] 索引%s完成：%d 个词条，用时 %.2fs，库=%s",
+                "[scinderbook] 索引%s完成：%d 个词条（另 %d 个因缺召回词/空正文未启用），用时 %.2fs，库=%s",
                 "重建" if reason == "manual" else "构建",
                 stats.get("entries", 0),
+                stats.get("blocked", 0),
                 self._built_at - started,
                 root,
             )
@@ -414,15 +424,21 @@ class ScinderBookPlugin(Star):
             yield event.plain_result("索引未就绪：请先在插件配置里填 vault_dir")
             return
         stats = index.stats()
+        blocked = int(self._blocked or 0)
         semantic_line = "语义兜底：关闭"
         if self._semantic_on:
             semantic_line = (
                 f"语义兜底：{self._c('embedding_provider_id')}，"
                 f"{index.embeddings_count()} 条向量 / {index.get_vector_dim()} 维"
             )
+        blocked_line = (
+            f"\n不可召回 {blocked} 条（缺召回词或正文为空，改好保存后自动恢复）"
+            if blocked
+            else ""
+        )
         yield event.plain_result(
             "关键词词条本\n"
-            f"词条 {stats['entries']} 条（常驻 {stats['always']} 条）\n"
+            f"词条 {stats['entries']} 条（常驻 {stats['always']} 条）{blocked_line}\n"
             f"检索词 {stats['keywords']} 个，正文合计 {stats['chars']} 字\n"
             f"{semantic_line}\n"
             f"本轮命中注入 {self._hits} 次 / {self._injected} 条"

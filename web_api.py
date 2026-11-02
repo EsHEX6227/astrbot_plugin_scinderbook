@@ -74,6 +74,7 @@ class ScinderBookWebAPI:
                 "summary": {
                     "total": len(entries),
                     "flagged": sum(1 for item in entries if item["level"] != "ok"),
+                    "blocked": sum(1 for item in entries if item["blocked"]),
                     "errors": sum(1 for item in entries if item["level"] == "error"),
                     "warns": sum(1 for item in entries if item["level"] == "warn"),
                     "keywords": sum(len(item["keywords"]) for item in entries),
