@@ -10,6 +10,11 @@ AstrBot 插件 · 核心约 500 行（含注释）· MIT
 
 </div>
 
+> [!IMPORTANT]
+> **本项目由 AI 生成。** 代码、测试与文档由 AI 编码代理（DeepSeek 驱动）起草，人类负责需求、评审与发布。
+> 上线前请自行通读 `main.py` 与 `scinderbook/`，尤其是注入逻辑；AI 生成的代码可能看起来合理但存在边界问题，请跑一遍单测并小范围试跑后再长期使用。
+
+
 ---
 
 ## 它是什么
@@ -197,6 +202,19 @@ git clone <本仓库地址> astrbot_plugin_scinderbook
 - [ ] 命中阈值自适应（按命中词数量而非固定分）
 - [ ] WebUI 管理面板（词条增删改 + 索引状态）
 
+## AI 生成声明
+
+这个仓库是 AI 生成项目，不是纯人工手写：
+
+- **AI 负责**：`main.py`、`scinderbook/` 下的核心实现、单测、README 与 CHANGELOG 的初稿
+- **人类负责**：需求定义、检索策略取舍（为什么不用 embedding）、评审与发布
+- **怎么复核**：
+  1. 跑 `python tests/test_entry.py` 和 `python tests/test_index.py`，两套都过再往下
+  2. 拿自己的词条目录跑 `/kwb test <关键词>`，确认命中的条目符合预期
+  3. 先只在一个会话里启用，观察几轮注入结果（`debug: true` 会打印命中详情）
+- **已知风险**：AI 容易写出「测试能过但边界不对」的代码，比如过长的检索词行、含句子标点的词条、常驻条目挤占 `max_chars`。这些情况单测覆盖了主要分支，但不保证穷尽。
+
+发现问题请开 issue，附上词条片段与 `/kwb test` 的输出。
 ## 致谢
 
 - [SillyTavern](https://github.com/SillyTavern/SillyTavern) / NovelAI 的 World Info 语义启发了这个设计
