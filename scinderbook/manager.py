@@ -65,6 +65,7 @@ class EntryInfo:
     body_len: int
     mtime: float
     issues: list[Issue] = field(default_factory=list)
+    disabled: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +73,7 @@ class EntryInfo:
             "title": self.title,
             "keywords": self.keywords,
             "always": self.always,
+            "disabled": self.disabled,
             "body_len": self.body_len,
             "mtime": self.mtime,
             "issues": [i.to_dict() for i in self.issues],
@@ -201,6 +203,7 @@ class Catalog:
                         title=entry.title,
                         keywords=entry.keywords,
                         always=self._is_always(rel, entry.title, entry.always),
+                        disabled=entry.disabled,
                         body_len=len(entry.body),
                         mtime=mtime,
                         issues=issues,
@@ -213,6 +216,7 @@ class Catalog:
                         title=path.stem,
                         keywords=[],
                         always=False,
+                        disabled=False,
                         body_len=0,
                         mtime=0.0,
                         issues=[Issue("unreadable", "文件读取或解析失败")],
@@ -233,6 +237,7 @@ class Catalog:
             "keywords": entry.keywords,
             "body": entry.body,
             "always": self._is_always(rel_path, entry.title, entry.always),
+            "disabled": entry.disabled,
             "mtime": path.stat().st_mtime,
             "issues": [i.to_dict() for i in issues],
             "level": worst_level(issues),
@@ -245,21 +250,36 @@ class Catalog:
     # ---------- 写入 ----------
 
     @staticmethod
-    def _render(title: str, keywords: list[str], body: str, always: bool) -> str:
+    def _render(
+        title: str,
+        keywords: list[str],
+        body: str,
+        always: bool,
+        disabled: bool = False,
+    ) -> str:
         title = (title or "").strip().replace("\n", " ")
         kws = " ".join(
             kw for kw in (_normalize_keyword(k) for k in keywords) if kw
         )
         body = body.replace("\r\n", "\n").strip()
-        parts: list[str] = []
-        if always:
-            parts.append("---\nalways: true\n---\n")
-        parts.append(f"# {title}\n")
+
+        # 规范形态：frontmatter? → 空行 → `# 标题` → 空行 → 召回词行 → 正文
+        out = ""
+        if always or disabled:
+            out += "---\n"
+            if always:
+                out += "always: true\n"
+            if disabled:
+                out += "disabled: true\n"
+            out += "---\n\n"
+        out += f"# {title}\n"
         if kws:
-            parts.append(kws + "\n")
-        if body:
-            parts.append("\n" + body + "\n")
-        return "\n".join(parts).rstrip("\n") + "\n"
+            out += f"\n{kws}\n"
+            if body:
+                out += f"{body}\n"
+        elif body:
+            out += f"\n{body}\n"
+        return out
 
     def save_entry(
         self,
@@ -268,12 +288,13 @@ class Catalog:
         keywords: list[str],
         body: str,
         always: bool = False,
+        disabled: bool = False,
     ) -> dict:
         if not (title or "").strip():
             raise ValueError("标题不能为空")
         path = self._safe_path(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = self._render(title, keywords, body, always)
+        text = self._render(title, keywords, body, always, disabled)
         path.write_text(text, encoding="utf-8", newline="\n")
         return self.read_entry(rel_path, include_raw=True)
 
@@ -328,7 +349,13 @@ class Catalog:
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(
-                    self._render(entry.title, entry.keywords, entry.body, entry.always),
+                    self._render(
+                        entry.title,
+                        entry.keywords,
+                        entry.body,
+                        entry.always,
+                        entry.disabled,
+                    ),
                     encoding="utf-8",
                     newline="\n",
                 )
@@ -358,6 +385,21 @@ class Catalog:
             return False
         path.unlink()
         return True
+
+    def set_disabled(self, rel_path: str, disabled: bool) -> dict:
+        """在目录里直接开关某条：只改 frontmatter 的 disabled，不动正文。
+
+        用文件里原本的 always，而不是配置派生出来的，避免把配置项固化成文件内容。
+        """
+        path = self._safe_path(rel_path)
+        if not path.is_file():
+            raise FileNotFoundError(rel_path)
+        entry = parse_entry(path.read_text(encoding="utf-8"), rel_path, mode=self.mode)
+        text = self._render(
+            entry.title, entry.keywords, entry.body, entry.always, bool(disabled)
+        )
+        path.write_text(text, encoding="utf-8", newline="\n")
+        return self.read_entry(rel_path)
 
     def _safe_folder(self, folder: str) -> Path:
         """导入/新建的目标目录：只允许 root 下的相对子目录。"""

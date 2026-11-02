@@ -18,11 +18,18 @@
 - `always_files` 匹配放宽：`Kn背景`、`Kn背景.md`、`sub/Kn背景.md`、条目名都认（大小写、反斜杠、`.md` 后缀都做了归一）
 - 配置页 `always_files` 补 `items` 并写清两种等效写法（配置列表 / 管理页勾选写 frontmatter）
 
+**检索与索引**
+
+- 禁用：`Entry.disabled` 从 frontmatter 读，`entry_blockers()` 直接返回 `["disabled"]`，整条不进索引、不注入（优先级高于常驻）
+- 启动日志与 `/kwb stats` 分别报「已禁用」和「不可召回」条数
+
 **管理页**
 
+- 新增禁用开关：目录里每条都有「禁用 / 启用」（悬停显现），禁用的条目变灰+删除线、不召回不注入（常驻也停），状态写进 md 的 `frontmatter: disabled: true`，Obsidian 里能看到
+- 新增 `Catalog.set_disabled()` / `entry/toggle` 接口；禁用与启用都会重建索引
 - 新增自建文件夹：`Catalog.create_folder()` / `list_folders()` / `folder/new` 接口，侧栏「＋ 文件夹」（支持 `名/子名`），空文件夹也会显示，建完自动定位
-- 目录里常驻条目加「常驻」角标，顶栏加「常驻 N」计数
-- 修复「内容」框高度：卡片 `min-height:0 + overflow:hidden`，textarea `flex:1 1 0; min-height:120px; resize:none`
+- 目录里常驻条目加「常驻」角标，顶栏加「常驻 N」「已禁用 N」计数
+- 修复「内容」框高度：栈用 `min-height:100%`，卡片 `min-height:220px + overflow:hidden`，textarea `flex:1 1 0`，矮窗口不再溢出
 - 修复「新建词条」点了没反应：页面在 sandbox iframe 里，`prompt`/`confirm` 被浏览器静默拦掉，改成页内弹窗；请求改走 `AstrBotPluginPage` 桥接
 
 **修复**
