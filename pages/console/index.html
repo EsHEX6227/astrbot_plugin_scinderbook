@@ -68,8 +68,14 @@
 
       /* ---------- 左侧：总览 + 分类目录 ---------- */
       .side { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
-      .side-head { padding: 11px 14px 9px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+      .side-head { padding: 11px 14px 9px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
       .side-head b { font-size: 12px; letter-spacing: .4px; color: var(--ink-2); text-transform: uppercase; }
+      .side-head .rowline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .mini {
+        padding: 3px 8px; border-radius: 7px; border: 1px solid var(--line);
+        background: #fbfaf9; color: var(--ink-2); font-size: 12px;
+      }
+      .mini:hover { border-color: #d6d3d1; color: var(--ink); background: #f5f5f4; }
       .target { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
       .target code { color: var(--accent); font-family: ui-monospace, "Cascadia Mono", monospace; }
       .target button { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; text-decoration: underline; }
@@ -97,6 +103,10 @@
       .row.blocked .name { color: var(--warn); }
       .row.blocked .dot { background: var(--warn); }
       .row.blocked .cnt { color: #dc8a8a; }
+      .row .pin {
+        font-size: 10px; line-height: 1.4; padding: 0 4px; border-radius: 4px;
+        background: var(--accent-soft); color: #92400e; border: 1px solid #fde68a; flex: none;
+      }
       .row .meta { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .row.dir .name { font-weight: 700; color: var(--ink); }
       .row.root .name { font-weight: 500; color: var(--ink-2); }
@@ -104,13 +114,16 @@
       .empty { padding: 22px 16px; color: var(--ink-3); font-size: 13px; text-align: center; }
 
       /* ---------- 右侧：从上到下三栏 ---------- */
-      .main { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
-      .stack { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px 20px; max-width: 1080px; flex: 1; min-height: 0; }
+      .main { overflow: auto; min-height: 0; }
+      .stack {
+        display: flex; flex-direction: column; gap: 14px;
+        padding: 16px 20px 20px; max-width: 1080px; min-height: 100%;
+      }
       .card {
         background: var(--panel); border: 1px solid var(--line);
         border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
       }
-      .card.fill { flex: 1; min-height: 240px; }
+      .card.fill { flex: 1 1 auto; min-height: 220px; overflow: hidden; }
       .card > .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .card > .head b { font-size: 12px; letter-spacing: .5px; color: var(--ink-2); text-transform: uppercase; }
       .card > .head .hint { font-size: 12px; color: var(--ink-3); }
@@ -138,7 +151,10 @@
       }
       textarea:focus, .field input:focus { border-color: #d6d3d1; }
       textarea.kwinput { min-height: 58px; }
-      textarea.content { min-height: 260px; flex: 1; line-height: 1.8; }
+      textarea.content {
+        min-height: 0; flex: 1 1 0; line-height: 1.8; resize: none;
+        overflow-y: auto;
+      }
       .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .grow { flex: 1; }
       .issues { display: flex; flex-direction: column; gap: 5px; }
@@ -223,6 +239,10 @@
             <div class="target">当前位置 <code id="targetLabel">/</code>
               <button id="btnRoot">回到根目录</button>
             </div>
+            <div class="rowline">
+              <button class="mini" id="btnNewFolder">＋ 文件夹</button>
+              <button class="mini" id="btnCollapseAll">全部收起</button>
+            </div>
           </div>
           <div class="filter">
             <input type="search" id="search" placeholder="搜索标题或召回词" />
@@ -279,7 +299,7 @@
       };
 
       const state = {
-        entries: [], status: {}, summary: {},
+        entries: [], folders: [], status: {}, summary: {},
         current: null, dirty: false,
         open: new Set(), folder: "",
       };
@@ -373,6 +393,7 @@
         chips.push(`<span class="chip">词条 <b>${sum.total || 0}</b></span>`);
         chips.push(`<span class="chip">召回词 <b>${sum.keywords || 0}</b></span>`);
         chips.push(`<span class="chip">正文 <b>${sum.chars || 0}</b> 字</span>`);
+        if (sum.always) chips.push(`<span class="chip amber">常驻 <b>${sum.always}</b></span>`);
         if (sum.blocked) chips.push(`<span class="chip warn">不可召回 <b>${sum.blocked}</b></span>`);
         if (sum.warns) chips.push(`<span class="chip amber">待检查 <b>${sum.warns}</b></span>`);
         if (!sum.blocked && !sum.warns && sum.total) chips.push(`<span class="chip ok">格式全部正常</span>`);
@@ -387,19 +408,27 @@
       }
 
       /* ---------------- 左侧：分类目录 ---------------- */
-      function buildTree(entries) {
+      function makeDir(name, parentPath) {
+        return { name, path: joinPath(parentPath, name), dirs: new Map(), files: [] };
+      }
+      function buildTree(entries, folders) {
         const root = { name: "", path: "", dirs: new Map(), files: [] };
+        // 先按后端给的文件夹建骨架，这样空文件夹也能显示
+        for (const rel of folders || []) {
+          let node = root;
+          for (const name of rel.split("/")) {
+            if (!name) continue;
+            if (!node.dirs.has(name)) node.dirs.set(name, makeDir(name, node.path));
+            node = node.dirs.get(name);
+          }
+        }
         for (const e of entries) {
           const parts = e.path.split("/");
           let node = root;
           for (let i = 0; i < parts.length - 1; i += 1) {
             const name = parts[i];
-            let child = node.dirs.get(name);
-            if (!child) {
-              child = { name, path: joinPath(node.path, name), dirs: new Map(), files: [] };
-              node.dirs.set(name, child);
-            }
-            node = child;
+            if (!node.dirs.has(name)) node.dirs.set(name, makeDir(name, node.path));
+            node = node.dirs.get(name);
           }
           node.files.push(e);
         }
@@ -413,10 +442,11 @@
       function fileRow(e, depth) {
         const active = state.current && state.current.path === e.path ? " active" : "";
         const blocked = e.blocked ? " blocked" : "";
+        const pin = e.always ? '<span class="pin">常驻</span>' : "";
         return `<div class="row file${active}${blocked}" data-path="${esc(e.path)}" style="margin-left:${depth * 13}px">
           <span class="caret"></span>
           <span class="dot ${DOT[e.level] || ""}"></span>
-          <span class="name">${esc(e.title)}</span>
+          <span class="name">${esc(e.title)}</span>${pin}
           <span class="cnt">${e.body_len}</span>
         </div>`;
       }
@@ -459,7 +489,7 @@
           return;
         }
 
-        const root = buildTree(state.entries);
+        const root = buildTree(state.entries, state.folders);
         if (!state.entries.length) {
           $("tree").innerHTML = '<div class="empty">目录里还没有 .md 词条，拖 .md 进来试试</div>';
           return;
@@ -525,6 +555,7 @@
         try {
           const data = await apiGet("entries");
           state.entries = data.entries || [];
+          state.folders = data.folders || [];
           state.status = data.status || {};
           state.summary = data.summary || {};
           renderChips();
@@ -581,8 +612,9 @@
         return `<section class="banner">
           <b>这条现在不会被召回，也不会注入上下文</b>
           <p>原因：${reasons}。</p>
-          <p>文件已经导入、内容也都在下面第三栏里。把召回词补到第二栏（<code>词1 词2</code> 空格分隔即可），
-             正文留在第三栏，点保存后它才会开始参与检索和注入。</p>
+          <p>两条路都能解决：<b>一</b>是把召回词补到第二栏（<code>词1 词2</code> 空格分隔），让它按关键词命中；
+             <b>二</b>是勾选「常驻注入」，让它每轮无条件注入（常驻不需要召回词）。
+             改完点保存，下一次重建就会生效。</p>
         </section>`;
       }
 
@@ -613,7 +645,9 @@
             <div class="kwbox" id="kwbox">
               ${kws.length
                 ? kws.map((k, i) => `<span class="kw">${esc(k)}<button data-i="${i}" title="删除">×</button></span>`).join("")
-                : '<span class="hint" style="font-size:12px;color:#a8a29e">还没有召回词——这句只能靠正文分词碰运气命中</span>'}
+                : (e.always
+                  ? '<span class="hint" style="font-size:12px;color:#92400e">常驻条目：每轮都注入，不需要召回词</span>'
+                  : '<span class="hint" style="font-size:12px;color:#a8a29e">还没有召回词——这句只能靠正文分词碰运气命中</span>')}
             </div>
             <textarea class="kwinput" id="kwAdd" placeholder="空格或逗号分隔，例如：看 观看 视觉 视力"></textarea>
             <div class="foot">
@@ -769,6 +803,29 @@
         state.folder = "";
         renderChips();
         renderTree();
+      });
+      $("btnCollapseAll").addEventListener("click", () => {
+        state.open.clear();
+        renderTree();
+      });
+      $("btnNewFolder").addEventListener("click", async () => {
+        const name = await askText(
+          "新建文件夹",
+          "",
+          state.folder ? "建在 /" + state.folder + " 下，可写 名 或 名/子名" : "可写 名 或 名/子名",
+        );
+        if (!name) return;
+        try {
+          const data = await apiPost("folder/new", { name, folder: state.folder });
+          state.open.add(state.folder);
+          openAncestors(data.path);
+          state.open.add(data.path);
+          state.folder = data.path;
+          await refresh();
+          toast("已创建文件夹 /" + data.path);
+        } catch (err) {
+          toast("新建文件夹失败：" + err.message, true);
+        }
       });
       $("btnReload").addEventListener("click", async () => {
         try {

@@ -87,11 +87,16 @@ class ScinderBookIndex:
 
     @_locked
     def rebuild(self, entries: list[Entry]) -> dict[str, int]:
-        """全量重建索引；同时清掉旧的向量（语义兜底需要重新算）。"""
+        """全量重建索引；同时清掉旧的向量（语义兜底需要重新算）。
+
+        没有召回词的词条（只可能是常驻）也写进 entries 表，因为它要靠常驻注入；
+        但它**不进倒排**，所以永远不会被关键词召回，也不会占掉 top_n 的位置。
+        """
         conn = self._conn
         conn.execute("DELETE FROM entries")
         self._reset_fts()
         conn.execute("DELETE FROM embeddings")
+        recallable = 0
         for entry in entries:
             cur = conn.execute(
                 "INSERT INTO entries(rel_path, title, keywords, body, always) VALUES (?,?,?,?,?)",
@@ -103,6 +108,9 @@ class ScinderBookIndex:
                     1 if entry.always else 0,
                 ),
             )
+            if not entry.keywords:
+                continue
+            recallable += 1
             rowid = cur.lastrowid
             search_text = " ".join(
                 tokenize(f"{entry.title} {entry.keyword_text} {entry.body}")
@@ -116,7 +124,7 @@ class ScinderBookIndex:
             (str(len(entries)),),
         )
         conn.commit()
-        return {"entries": len(entries)}
+        return {"entries": len(entries), "recallable": recallable}
 
     # ---------- 语义兜底（可选） ----------
 

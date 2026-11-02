@@ -152,7 +152,60 @@ def test_import_keeps_malformed_but_marks_blocked() -> None:
     assert "正文内容。" in (root / "导入" / "导入好.md").read_text(encoding="utf-8")
 
 
-def test_fixing_keywords_unblocks() -> None:
+def test_always_entry_needs_no_keywords() -> None:
+    """常驻不需要召回词：勾了常驻就不该再报「没有召回词」。"""
+    cat, root = _vault()
+    (root / "常驻无词.md").write_text(
+        "---\nalways: true\n---\n# 常驻无词\n全局基调正文。\n", encoding="utf-8"
+    )
+    info = {item["path"]: item for item in cat.list_entries()}["常驻无词.md"]
+    codes = {i["code"] for i in info["issues"]}
+    assert info["always"] is True
+    assert info["blocked"] is False
+    assert "no_keywords" not in codes and "keyword_line_skipped" not in codes
+    detail = cat.read_entry("常驻无词.md")
+    assert detail["blocked"] is False and detail["always"] is True
+
+
+def test_always_files_tolerant_matching() -> None:
+    """配置里写 Kn视力 / Kn视力.md / sub/嵌套 都算数。"""
+    root = tempfile.mkdtemp(prefix="scinderbook-")
+    root = Path(root)
+    (root / "Kn视力.md").write_text("# Kn视力\n\n正文。\n", encoding="utf-8")
+    (root / "sub").mkdir()
+    (root / "sub" / "嵌套.md").write_text("# 嵌套\n\n正文。\n", encoding="utf-8")
+
+    cat = Catalog(root, always_files=["Kn视力", "sub/嵌套.md"])
+    items = {item["path"]: item for item in cat.list_entries()}
+    assert items["Kn视力.md"]["always"] is True
+    assert items["sub/嵌套.md"]["always"] is True
+    # 常驻给了它免死金牌：没有召回词也不算 blocked
+    assert items["Kn视力.md"]["blocked"] is False
+
+
+def test_create_folder_and_list() -> None:
+    cat, root = _vault()
+    rel = cat.create_folder("新分类/子层")
+    assert rel == "新分类/子层"
+    assert (root / "新分类" / "子层").is_dir()
+    folders = cat.list_folders()
+    assert "sub" in folders and "新分类" in folders and "新分类/子层" in folders
+    # 空文件夹也要能列出来
+    assert (root / "新分类" / "子层").exists()
+    for bad in ("../外面", "/绝对", "..", ".", "a/../../b"):
+        try:
+            cat.create_folder(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"应当拒绝：{bad!r}")
+
+
+def test_folder_targets_new_entry() -> None:
+    cat, root = _vault()
+    cat.create_folder("空壳")
+    created = cat.create_entry("落进去", folder="空壳")
+    assert created["path"] == "空壳/落进去.md"
+    assert (root / "空壳" / "落进去.md").is_file()
     cat, _ = _vault()
     assert cat.read_entry("Kn坏词条.md")["blocked"] is True
     cat.save_entry(

@@ -66,10 +66,13 @@ class ScinderBookWebAPI:
 
     @_guard("entries")
     async def entries(self, **_kwargs) -> Any:
-        entries = self.catalog.list_entries()
+        catalog = self.catalog
+        entries = catalog.list_entries()
+        folders = catalog.list_folders()
         return _ok(
             {
                 "entries": entries,
+                "folders": folders,
                 "status": self.plugin.web_status(),
                 "summary": {
                     "total": len(entries),
@@ -77,6 +80,7 @@ class ScinderBookWebAPI:
                     "blocked": sum(1 for item in entries if item["blocked"]),
                     "errors": sum(1 for item in entries if item["level"] == "error"),
                     "warns": sum(1 for item in entries if item["level"] == "warn"),
+                    "always": sum(1 for item in entries if item["always"]),
                     "keywords": sum(len(item["keywords"]) for item in entries),
                     "chars": sum(item["body_len"] for item in entries),
                 },
@@ -153,6 +157,15 @@ class ScinderBookWebAPI:
             {"removed": removed, "index": stats, "status": self.plugin.web_status()}
         )
 
+    @_guard("folder/new")
+    async def create_folder(self, **_kwargs) -> Any:
+        payload = await request.json(default={}) or {}
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return _fail("文件夹名不能为空", "invalid")
+        rel = self.catalog.create_folder(name, folder=str(payload.get("folder") or ""))
+        return _ok({"path": rel, "folders": self.catalog.list_folders()})
+
     @_guard("rebuild")
     async def rebuild(self, **_kwargs) -> Any:
         stats = await self.plugin.rebuild_now(reason="webui")
@@ -179,6 +192,7 @@ def register(plugin) -> None:
         ("entry/new", api.create, ["POST"], "新建词条"),
         ("entry/import", api.import_entries, ["POST"], "导入拖进来的 .md"),
         ("entry/delete", api.delete, ["POST"], "删除词条"),
+        ("folder/new", api.create_folder, ["POST"], "新建文件夹"),
         ("rebuild", api.rebuild, ["POST"], "重建索引与向量"),
         ("suggest", api.suggest, ["POST"], "从正文提取候选召回词"),
         ("status", api.status, ["GET"], "运行状态"),

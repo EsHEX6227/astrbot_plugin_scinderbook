@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scinderbook.entry import scan_dir  # noqa: E402
+from scinderbook.entry import Entry, scan_dir  # noqa: E402
 from scinderbook.index import ScinderBookIndex  # noqa: E402
 
 FILES = {
@@ -98,6 +98,34 @@ def test_usable_across_threads() -> None:
     for t in threads:
         t.join()
     assert out and all(x == out[0] for x in out) and out[0] >= 1, out
+    index.close()
+
+
+def test_always_without_keywords_is_injected_but_not_recallable() -> None:
+    """常驻不需要召回词：正文照常注入，但不进倒排（不会被关键词召回占位）。"""
+    entries = [
+        Entry("常驻.md", "常驻无词", [], "全局基调正文。", True),
+        Entry("有词.md", "有词条目", ["苹果"], "苹果正文。", False),
+    ]
+    index = ScinderBookIndex(Path(tempfile.mkdtemp(prefix="scinderbook_idx_")) / "i.sqlite")
+    stats = index.rebuild(entries)
+    assert stats["entries"] == 2
+    assert stats["recallable"] == 1
+
+    # 常驻：任何查询都会被带上，分数 0（不是词法命中）
+    hits = index.search("完全无关的一句话")
+    titles = [e.title for _, e in hits]
+    assert "常驻无词" in titles, titles
+    assert dict((e.title, s) for s, e in hits)["常驻无词"] == 0.0
+
+    # 拿它正文里的词去查，也只走常驻那条路，不会变成词法命中
+    hits = index.search("全局基调正文")
+    scores = {e.title: s for s, e in hits}
+    assert scores.get("常驻无词") == 0.0, scores
+
+    # 关键词条目照旧能命中
+    hits = index.search("苹果")
+    assert hits and hits[0][1].title == "有词条目"
     index.close()
 
 

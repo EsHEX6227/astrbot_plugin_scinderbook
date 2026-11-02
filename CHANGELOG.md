@@ -2,22 +2,33 @@
 
 ## 未发布
 
-修：导入时 `SQLite objects created in a thread can only be used in that same thread`。
+> 这一批改动还没发布，全部在本地提交里（v0.3.0 之后）。
 
-- `ScinderBookIndex` 的连接改为 `check_same_thread=False`，并给所有碰连接的方法加 `threading.RLock` 串行化。索引重建跑在 `asyncio.to_thread` 的工作线程里，召回在事件循环线程里，两边现在共用一个连接也不会炸
-- 重建时关闭上一个连接，避免反复重建攒下 fd 泄漏
-- 新增 `test_usable_across_threads`：在工作线程里建连接、在主线程和多个并发线程里查询
+**导入**
 
-## 未发布（前一条）
-
-导入不再拒收格式错误，改成「收下但不启用」。
-
-- 导入：格式不对的 `.md` 也照常落盘，只是标成**不可召回**（目录里字体转红），点开才显示具体原因；只有「非 md / 空文件 / 写不进去」才退回
+- 格式不对的 `.md` 也照常落盘，只是标成**不可召回**（目录里字体转红），点开才显示具体原因；只有「非 md / 空文件 / 写不进去」才退回
 - 缺召回词的文件：`# 标题` 以下整篇内容**一行不吞**地放进「内容」栏，等着用户自己把词表那行剪到「召回词」栏
-- 索引：`entry_blockers()` 判定为不可用的词条会被 `rebuild` 跳过，既不参与召回也不注入；改好保存后自动恢复。`/kwb stats` 与启动日志都会显示不可召回条数
-- 级别调整：`no_keywords` / `keyword_line_skipped` 从 `warn` 升为 `error`（= 标红 + 不启用）；`no_heading` / `filename_mismatch` 仍只影响展示
-- 页面：不可召回的条目在目录里红字 + 红点，顶栏「不可召回 N」红色计数；编辑区顶部红条说明「这条不会被召回」以及怎么修；保存时如果仍不合格会明确提示
-- 测试：新增 `test_entry_blockers_rule`、`test_fixing_keywords_unblocks`，导入用例改为断言「坏文件也导入且 blocked」
+- 索引：`entry_blockers()` 判定为不可用的词条会被 `rebuild` 跳过，既不参与召回也不注入；改好保存后自动恢复
+- 级别调整：`no_keywords` / `keyword_line_skipped` 从 warn 升为 error（= 标红 + 不启用）；`no_heading` / `filename_mismatch` 仍只影响展示
+
+**常驻**
+
+- 常驻词条不再要求召回词：勾上「常驻注入」后不会再标红/报「没有召回词」（`entry_blockers()` 对 `always` 豁免）
+- 常驻条目会进 `entries` 表（要注入），但**不进倒排**，所以不会被关键词召回、也不占 `top_n`；`rebuild()` 额外返回 `recallable`
+- `always_files` 匹配放宽：`Kn背景`、`Kn背景.md`、`sub/Kn背景.md`、条目名都认（大小写、反斜杠、`.md` 后缀都做了归一）
+- 配置页 `always_files` 补 `items` 并写清两种等效写法（配置列表 / 管理页勾选写 frontmatter）
+
+**管理页**
+
+- 新增自建文件夹：`Catalog.create_folder()` / `list_folders()` / `folder/new` 接口，侧栏「＋ 文件夹」（支持 `名/子名`），空文件夹也会显示，建完自动定位
+- 目录里常驻条目加「常驻」角标，顶栏加「常驻 N」计数
+- 修复「内容」框高度：卡片 `min-height:0 + overflow:hidden`，textarea `flex:1 1 0; min-height:120px; resize:none`
+- 修复「新建词条」点了没反应：页面在 sandbox iframe 里，`prompt`/`confirm` 被浏览器静默拦掉，改成页内弹窗；请求改走 `AstrBotPluginPage` 桥接
+
+**修复**
+
+- `SQLite objects created in a thread can only be used in that same thread`：连接改 `check_same_thread=False` + `RLock` 串行化，重建时关闭旧连接
+- 测试：`test_manager.py` 17 项、`test_index.py` 新增跨线程与「常驻无词」用例
 
 ## v0.3.0 (2026-11-02)
 
