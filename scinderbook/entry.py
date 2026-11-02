@@ -153,6 +153,23 @@ def _extract_title_and_body(rest: str, fallback_title: str) -> tuple[str, str]:
     return fallback_title, rest.strip()
 
 
+def entry_blockers(entry: Entry) -> list[str]:
+    """返回「让这条词条不可召回」的原因代码，空列表表示可用。
+
+    这条规则同时被索引构建和管理页使用：
+    - 没有召回词：没有任何入口能命中它，只能靠正文分词瞎撞，等于不可控
+    - 正文为空：命中了也没有内容可注入
+
+    缺 `# 标题`、文件名与条目名不一致这类问题只影响展示，不阻断召回。
+    """
+    problems: list[str] = []
+    if not entry.keywords:
+        problems.append("no_keywords")
+    if not entry.body.strip():
+        problems.append("empty_body")
+    return problems
+
+
 def parse_entry(raw: str, rel_path: str, mode: str = "auto") -> Entry:
     """解析单个词条文本。"""
     fallback = Path(rel_path).stem
