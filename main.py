@@ -161,12 +161,20 @@ class ScinderBookPlugin(Star):
                 # 缺召回词 / 正文为空的词条：文件保留，但不进索引，也不参与注入
                 usable = [e for e in entries if not entry_blockers(e)]
                 blocked = len(entries) - len(usable)
+                previous = self._index
                 index = ScinderBookIndex(self.db_path)
-                stats = index.rebuild(usable)
+                try:
+                    stats = index.rebuild(usable)
+                except Exception:
+                    index.close()
+                    raise
                 stats["blocked"] = blocked
                 stats["skipped"] = len(failed)
                 self._index = index
                 self._blocked = blocked
+                # 旧连接要关掉，否则每次重建都留一个 fd
+                if previous is not None and previous is not index:
+                    previous.close()
                 if failed:
                     logger.warning(
                         "[scinderbook] %d 个文件解析失败或被跳过：%s",

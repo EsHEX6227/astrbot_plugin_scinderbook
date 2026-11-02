@@ -2,6 +2,14 @@
 
 ## 未发布
 
+修：导入时 `SQLite objects created in a thread can only be used in that same thread`。
+
+- `ScinderBookIndex` 的连接改为 `check_same_thread=False`，并给所有碰连接的方法加 `threading.RLock` 串行化。索引重建跑在 `asyncio.to_thread` 的工作线程里，召回在事件循环线程里，两边现在共用一个连接也不会炸
+- 重建时关闭上一个连接，避免反复重建攒下 fd 泄漏
+- 新增 `test_usable_across_threads`：在工作线程里建连接、在主线程和多个并发线程里查询
+
+## 未发布（前一条）
+
 导入不再拒收格式错误，改成「收下但不启用」。
 
 - 导入：格式不对的 `.md` 也照常落盘，只是标成**不可召回**（目录里字体转红），点开才显示具体原因；只有「非 md / 空文件 / 写不进去」才退回

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -58,6 +59,46 @@ def test_no_embedding_and_no_keywords_in_body() -> None:
     rendered = hits[0][1].render()
     assert "触觉 摸 感觉到" not in rendered
     assert "你没有触觉" in rendered
+
+
+def test_usable_across_threads() -> None:
+    """连接在工作线程里建、在另一个线程里查（插件用 asyncio.to_thread 重建）。"""
+    root = _make_vault()
+    entries, _ = scan_dir(root)
+    db = Path(tempfile.mkdtemp(prefix="scinderbook_idx_")) / "i.sqlite"
+    box: dict = {}
+
+    def build() -> None:
+        index = ScinderBookIndex(db)
+        box["index"] = index
+        box["stats"] = index.rebuild(entries)
+
+    worker = threading.Thread(target=build)
+    worker.start()
+    worker.join()
+    assert box["stats"]["entries"] == 4
+
+    index = box["index"]
+    # 主线程查询
+    hits = index.search("署名应该怎么写", top_n=3)
+    assert hits and hits[0][1].title == "Kn署名"
+    assert index.stats()["entries"] == 4
+    assert index.embeddings_count() == 0
+    assert index.get_vector_dim() == 0
+
+    # 再换一个线程查，顺便并发跑几轮
+    out: list[int] = []
+
+    def query() -> None:
+        out.append(len(index.search("消息抖动是什么", top_n=3)))
+
+    threads = [threading.Thread(target=query) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert out and all(x == out[0] for x in out) and out[0] >= 1, out
+    index.close()
 
 
 if __name__ == "__main__":
