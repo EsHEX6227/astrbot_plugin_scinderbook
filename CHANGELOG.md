@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0 (2026-11-02)
+
+自带 WebUI 词条管理页。
+
+- 新增 `pages/console/index.html`：左侧条目总览 + 分类目录树（按子文件夹生成，二级嵌套，点击展开、默认收起），右侧从上到下三栏「标题 → 召回词 → 内容」
+- 新增拖拽导入：把 `.md` 拖到页面上（或点「导入 .md」选文件）即按「标题 + 召回词 + 正文」重排落盘；格式不对的不落盘并说明原因（无召回词 / 正文为空 / 非 md / 空文件），同名自动加 `-2` 后缀
+- 新增 `web_api.py`：`entries` / `entry` / `entry/save` / `entry/new` / `entry/import` / `entry/delete` / `rebuild` / `suggest` / `status` 九个接口，走仪表盘登录态
+- 修复：页面在宿主的 sandbox iframe 里（无 `allow-same-origin`）拿不到 cookie、`prompt()`/`confirm()` 被静默拦截，导致「新建词条」点了没反应。改为全量走 `AstrBotPluginPage.apiGet/apiPost` 桥接 + 页内自绘弹窗
+- 修复：接口返回体改成仪表盘约定的 `{"status":"ok","data":...}` / `{"status":"error","message":...}`，桥接层才能正确取数据与抛错
+- 新增 `scinderbook/manager.py`：词条目录的读写与体检，写回时按规范重排（`# 标题` → 召回词行 → 空行 → 正文，`always` 走 frontmatter），路径只允许目录内 `.md`，`..`/绝对路径一律拒绝
+- 格式问题自动标出并分级：`error`（读不出、正文为空）、`warn`（无召回词、首行是句子、正文超长、标题不一致）、`info`（缺 `# 标题`、文件名不一致）
+- 保存/新建/导入/删除后自动重建索引与向量，页面统计即时刷新
+- 「从正文提取候选」按钮：有 jieba 用 TF-IDF 抽词，没有就退回分词频次
+- 新增 `.astrbot-plugin/i18n/{zh-CN,en-US}.json`：页面标题与插件简介的多语言
+- 新增 `tests/test_manager.py`（11 项，含路径穿越、目录越界、导入接受/退回与同名不覆盖）
+
 ## v0.2.0 (2026-11-02)
 
 可选的语义兜底。

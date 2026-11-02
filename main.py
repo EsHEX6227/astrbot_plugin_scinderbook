@@ -19,6 +19,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .scinderbook import ScinderBookIndex, scan_dir
+from .scinderbook.manager import Catalog
 
 PLUGIN_ID = "astrbot_plugin_scinderbook"
 INJECT_HEADER = (
@@ -28,7 +29,7 @@ INJECT_HEADER = (
 INJECT_FOOTER = "\n</scinderbook>"
 
 
-@register(PLUGIN_ID, "YuJieABN", "检索词与正文分离的两段式词条注入", "v0.1.0")
+@register(PLUGIN_ID, "YuJieABN", "检索词与正文分离的两段式词条注入", "v0.3.0")
 class ScinderBookPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None) -> None:
         super().__init__(context)
@@ -67,11 +68,75 @@ class ScinderBookPlugin(Star):
 
     async def initialize(self) -> None:
         await self._rebuild(reason="startup")
+        self._register_web_api()
+
+    def _register_web_api(self) -> None:
+        """挂上管理页的接口；老版本没有这套 API 就静默跳过。"""
+        try:
+            from . import web_api
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[scinderbook] 管理页接口未启用：%s", exc)
+            return
+        try:
+            web_api.register(self)
+            logger.info("[scinderbook] 管理页接口已注册")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[scinderbook] 管理页接口注册失败：%s", exc)
 
     async def terminate(self) -> None:
         if self._index is not None:
             self._index.close()
             self._index = None
+
+    # ---------------- 管理接口用到的门面 ----------------
+
+    def catalog(self) -> Catalog:
+        """词条管理器；未配置 vault_dir 时抛 ValueError（接口层会转成提示）。"""
+        root = self.vault_dir
+        if root is None:
+            raise ValueError(
+                "vault_dir 未配置或不是有效目录，请先在插件配置里填词条目录"
+            )
+        return Catalog(
+            root,
+            mode=str(self._c("keyword_mode", "auto") or "auto"),
+            always_files=list(self._c("always_files", []) or []),
+            max_chars=int(self._c("max_chars", 1500) or 1500),
+        )
+
+    def web_status(self) -> dict:
+        """给管理页看的运行状态。"""
+        stats: dict = {}
+        if self._index is not None:
+            try:
+                stats = self._index.stats()
+            except Exception:  # noqa: BLE001
+                stats = {}
+        return {
+            "plugin": PLUGIN_ID,
+            "vault_dir": str(self.vault_dir or ""),
+            "configured": self.vault_dir is not None,
+            "enabled": bool(self._c("enabled", True)),
+            "keyword_mode": str(self._c("keyword_mode", "auto") or "auto"),
+            "inject_position": str(self._c("inject_position", "user_tail") or "user_tail"),
+            "top_n": int(self._c("top_n", 3) or 3),
+            "max_chars": int(self._c("max_chars", 1500) or 1500),
+            "index": stats,
+            "semantic": {
+                "enabled": self._semantic_on,
+                "provider": str(self._c("embedding_provider_id", "") or ""),
+                "vectors": self._index.embeddings_count() if self._index else 0,
+                "dim": self._index.get_vector_dim() if self._index else 0,
+            },
+            "hits": self._hits,
+            "injected": self._injected,
+        }
+
+    async def rebuild_now(self, reason: str = "manual") -> dict[str, int]:
+        """给管理接口用的重建入口。"""
+        self._hits = 0
+        self._injected = 0
+        return await self._rebuild(reason=reason)
 
     # ---------------- 索引 ----------------
 

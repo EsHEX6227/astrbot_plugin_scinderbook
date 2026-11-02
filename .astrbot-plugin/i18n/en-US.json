@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "display_name": "ScinderBook",
+    "short_desc": "Two-stage entries: recall keywords separate from content",
+    "desc": "The first line of an entry holds recall keywords, the rest is content. Matching is local FTS5 over keywords only; on a hit, only the title and content are injected — never the keyword row. Ships a WebUI entry manager."
+  },
+  "pages": {
+    "console": {
+      "title": "Entries"
+    }
+  }
+}
