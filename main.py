@@ -42,6 +42,7 @@ class ScinderBookPlugin(Star):
         self._injected = 0
         self._vec_cache: dict[str, list[float]] = {}
         self._blocked = 0
+        self._disabled = 0
 
     # ---------------- 配置 ----------------
 
@@ -125,6 +126,7 @@ class ScinderBookPlugin(Star):
             "max_chars": int(self._c("max_chars", 1500) or 1500),
             "index": stats,
             "blocked": self._blocked,
+            "disabled": self._disabled,
             "semantic": {
                 "enabled": self._semantic_on,
                 "provider": str(self._c("embedding_provider_id", "") or ""),
@@ -158,9 +160,11 @@ class ScinderBookPlugin(Star):
 
             def _work() -> dict[str, int]:
                 entries, failed = scan_dir(root, mode=mode, always_files=always)
-                # 缺召回词 / 正文为空的词条：文件保留，但不进索引，也不参与注入
-                usable = [e for e in entries if not entry_blockers(e)]
-                blocked = len(entries) - len(usable)
+                # 手动禁用的整条跳过；缺召回词 / 正文为空的也不进索引
+                active = [e for e in entries if not e.disabled]
+                disabled = len(entries) - len(active)
+                usable = [e for e in active if not entry_blockers(e)]
+                blocked = len(active) - len(usable)
                 previous = self._index
                 index = ScinderBookIndex(self.db_path)
                 try:
@@ -169,9 +173,11 @@ class ScinderBookPlugin(Star):
                     index.close()
                     raise
                 stats["blocked"] = blocked
+                stats["disabled"] = disabled
                 stats["skipped"] = len(failed)
                 self._index = index
                 self._blocked = blocked
+                self._disabled = disabled
                 # 旧连接要关掉，否则每次重建都留一个 fd
                 if previous is not None and previous is not index:
                     previous.close()
@@ -187,9 +193,10 @@ class ScinderBookPlugin(Star):
             stats = await asyncio.to_thread(_work)
             self._built_at = time.monotonic()
             logger.info(
-                "[scinderbook] 索引%s完成：%d 个词条（另 %d 个因缺召回词/空正文未启用），用时 %.2fs，库=%s",
+                "[scinderbook] 索引%s完成：%d 个词条（禁用 %d 个，缺召回词/空正文 %d 个未启用），用时 %.2fs，库=%s",
                 "重建" if reason == "manual" else "构建",
                 stats.get("entries", 0),
+                stats.get("disabled", 0),
                 stats.get("blocked", 0),
                 self._built_at - started,
                 root,
@@ -433,17 +440,18 @@ class ScinderBookPlugin(Star):
             return
         stats = index.stats()
         blocked = int(self._blocked or 0)
+        disabled = int(self._disabled or 0)
         semantic_line = "语义兜底：关闭"
         if self._semantic_on:
             semantic_line = (
                 f"语义兜底：{self._c('embedding_provider_id')}，"
                 f"{index.embeddings_count()} 条向量 / {index.get_vector_dim()} 维"
             )
-        blocked_line = (
-            f"\n不可召回 {blocked} 条（缺召回词或正文为空，改好保存后自动恢复）"
-            if blocked
-            else ""
-        )
+        blocked_line = ""
+        if disabled:
+            blocked_line += f"\n已禁用 {disabled} 条（在管理页点一下就能恢复）"
+        if blocked:
+            blocked_line += f"\n不可召回 {blocked} 条（缺召回词或正文为空，改好保存后自动恢复）"
         yield event.plain_result(
             "关键词词条本\n"
             f"词条 {stats['entries']} 条（常驻 {stats['always']} 条）{blocked_line}\n"

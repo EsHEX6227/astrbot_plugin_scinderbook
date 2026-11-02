@@ -50,6 +50,7 @@ class Entry:
     keywords: list[str] = field(default_factory=list)
     body: str = ""
     always: bool = False
+    disabled: bool = False
 
     @property
     def keyword_text(self) -> str:
@@ -157,6 +158,7 @@ def entry_blockers(entry: Entry) -> list[str]:
     """返回「让这条词条不可用」的原因代码，空列表表示可用。
 
     这条规则同时被索引构建和管理页使用：
+    - 手动禁用：整条跳过（既不召回也不注入）
     - 没有召回词、且不是常驻：没有任何入口能命中它，等于不可控
     - 正文为空：命中了也没有内容可注入
 
@@ -164,6 +166,8 @@ def entry_blockers(entry: Entry) -> list[str]:
     它每轮都被无条件注入；缺 `# 标题`、文件名与条目名不一致这类问题只影响展示。
     """
     problems: list[str] = []
+    if entry.disabled:
+        return ["disabled"]
     if not entry.always and not entry.keywords:
         problems.append("no_keywords")
     if not entry.body.strip():
@@ -202,6 +206,15 @@ def parse_entry(raw: str, rel_path: str, mode: str = "auto") -> Entry:
     meta, rest = _split_frontmatter(raw)
 
     always = str(meta.get("always", "")).strip().lower() in {"true", "1", "yes", "on"}
+    disabled = str(meta.get("disabled", "")).strip().lower() in {"true", "1", "yes", "on"}
+    if meta.get("enabled") is not None:
+        # 也接受 enabled: false 的写法
+        disabled = disabled or str(meta.get("enabled", "")).strip().lower() in {
+            "false",
+            "0",
+            "no",
+            "off",
+        }
     keywords: list[str] = []
     for key in ("keywords", "aliases", "alias", "keys"):
         if meta.get(key):
@@ -237,6 +250,7 @@ def parse_entry(raw: str, rel_path: str, mode: str = "auto") -> Entry:
         keywords=unique,
         body=body,
         always=always,
+        disabled=disabled,
     )
 
 

@@ -78,6 +78,7 @@ class ScinderBookWebAPI:
                     "total": len(entries),
                     "flagged": sum(1 for item in entries if item["level"] != "ok"),
                     "blocked": sum(1 for item in entries if item["blocked"]),
+                    "disabled": sum(1 for item in entries if item["disabled"]),
                     "errors": sum(1 for item in entries if item["level"] == "error"),
                     "warns": sum(1 for item in entries if item["level"] == "warn"),
                     "always": sum(1 for item in entries if item["always"]),
@@ -157,6 +158,17 @@ class ScinderBookWebAPI:
             {"removed": removed, "index": stats, "status": self.plugin.web_status()}
         )
 
+    @_guard("entry/toggle")
+    async def toggle(self, **_kwargs) -> Any:
+        payload = await request.json(default={}) or {}
+        rel_path = str(payload.get("path") or "").strip()
+        if not rel_path:
+            return _fail("缺少 path 参数", "invalid")
+        disabled = bool(payload.get("disabled"))
+        entry = self.catalog.set_disabled(rel_path, disabled)
+        stats = await self.plugin.rebuild_now(reason="webui-toggle")
+        return _ok({"entry": entry, "index": stats, "status": self.plugin.web_status()})
+
     @_guard("folder/new")
     async def create_folder(self, **_kwargs) -> Any:
         payload = await request.json(default={}) or {}
@@ -192,6 +204,7 @@ def register(plugin) -> None:
         ("entry/new", api.create, ["POST"], "新建词条"),
         ("entry/import", api.import_entries, ["POST"], "导入拖进来的 .md"),
         ("entry/delete", api.delete, ["POST"], "删除词条"),
+        ("entry/toggle", api.toggle, ["POST"], "启用/禁用词条"),
         ("folder/new", api.create_folder, ["POST"], "新建文件夹"),
         ("rebuild", api.rebuild, ["POST"], "重建索引与向量"),
         ("suggest", api.suggest, ["POST"], "从正文提取候选召回词"),

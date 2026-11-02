@@ -228,6 +228,48 @@ def test_entry_blockers_rule() -> None:
     assert entry_blockers(Entry("a.md", "A", [], "")) == ["no_keywords", "empty_body"]
 
 
+def test_disabled_entry_is_not_usable() -> None:
+    from scinderbook.entry import Entry, entry_blockers
+
+    assert entry_blockers(Entry("a.md", "A", ["看"], "正文", False, True)) == ["disabled"]
+    # 常驻也照样被禁用挡掉
+    assert entry_blockers(Entry("a.md", "A", [], "正文", True, True)) == ["disabled"]
+
+
+def test_disable_and_enable_roundtrip() -> None:
+    cat, root = _vault()
+    off = cat.set_disabled("Kn视力.md", True)
+    assert off["disabled"] is True
+    text = (root / "Kn视力.md").read_text(encoding="utf-8")
+    assert text.startswith("---\ndisabled: true\n---\n")
+    assert "看 观看 视觉 视力" in text and "你默认没有视觉能力。" in text
+
+    listing = {item["path"]: item for item in cat.list_entries()}["Kn视力.md"]
+    assert listing["disabled"] is True
+    # 禁用不等于「格式坏了」，所以不该顺带标红
+    assert listing["blocked"] is False
+
+    back = cat.set_disabled("Kn视力.md", False)
+    assert back["disabled"] is False
+    text = (root / "Kn视力.md").read_text(encoding="utf-8")
+    assert not text.startswith("---")
+    assert "看 观看 视觉 视力" in text
+
+
+def test_disable_keeps_always() -> None:
+    cat, root = _vault()
+    (root / "常驻.md").write_text(
+        "---\nalways: true\n---\n# 常驻\n基调正文。\n", encoding="utf-8"
+    )
+    cat.set_disabled("常驻.md", True)
+    text = (root / "常驻.md").read_text(encoding="utf-8")
+    assert "always: true" in text and "disabled: true" in text
+    detail = cat.read_entry("常驻.md")
+    assert detail["always"] is True and detail["disabled"] is True
+    cat.set_disabled("常驻.md", False)
+    assert "always: true" in (root / "常驻.md").read_text(encoding="utf-8")
+
+
 def test_delete_entry() -> None:
     cat, root = _vault()
     assert cat.delete_entry("Kn空.md") is True
