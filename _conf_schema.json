@@ -1,0 +1,61 @@
+{
+  "enabled": {
+    "description": "启用关键词词条注入",
+    "type": "bool",
+    "default": true
+  },
+  "vault_dir": {
+    "description": "词条目录（递归扫描 .md）",
+    "type": "string",
+    "default": "",
+    "hint": "每个 .md 是一个词条：一级标题作条目名，紧随其后的第一行是检索词（空格分隔），其余是正文。也支持 YAML frontmatter 的 keywords/aliases。"
+  },
+  "keyword_mode": {
+    "description": "检索词的识别方式",
+    "type": "string",
+    "default": "auto",
+    "options": ["auto", "frontmatter_only"],
+    "hint": "auto：优先 frontmatter，没有则把标题后的第一行当检索词；frontmatter_only：只认 frontmatter，其余内容全部算正文。"
+  },
+  "top_n": {
+    "description": "每轮最多注入几个词条",
+    "type": "int",
+    "default": 3
+  },
+  "max_chars": {
+    "description": "单轮注入的总字数上限",
+    "type": "int",
+    "default": 1500,
+    "hint": "超出时按得分从高到低截断，不会切词条正文的一半。"
+  },
+  "min_score": {
+    "description": "命中分数下限",
+    "type": "float",
+    "default": 0.0,
+    "hint": "低于该分数不注入。0 表示只要求有命中的检索词。"
+  },
+  "inject_position": {
+    "description": "注入位置",
+    "type": "string",
+    "default": "user_tail",
+    "options": ["user_tail", "system_prompt"],
+    "hint": "user_tail：作为本轮临时内容附在对话尾部（推荐，不破坏 KV 前缀）；system_prompt：拼进系统提示词（会打断前缀缓存）。"
+  },
+  "always_files": {
+    "description": "常驻词条（文件名列表）",
+    "type": "list",
+    "default": [],
+    "hint": "这些文件无论是否命中都会注入，适合放全局基调，例如 [\"Kn郁洁背景.md\"]。"
+  },
+  "rebuild_interval_min": {
+    "description": "自动重建索引的间隔（分钟）",
+    "type": "int",
+    "default": 0,
+    "hint": "0 = 只在插件启动和手动 /kwb reload 时重建。"
+  },
+  "debug": {
+    "description": "调试日志",
+    "type": "bool",
+    "default": false
+  }
+}
