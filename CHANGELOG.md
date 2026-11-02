@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0 (2026-11-02)
+
+可选的语义兜底。
+
+- 新增 `semantic_enabled` / `embedding_provider_id`：填一个 AstrBot 已配置的嵌入提供商即可开启，默认关闭
+- embedding **只取正文**（不含检索词），避免词表稀释语义
+- 融合策略：关键词优先，只在没占满 `top_n` 时用向量补位；`semantic_min_sim` 控制阈值
+- 向量与倒排存在同一个 SQLite，重建索引时一起重算；没装 numpy 也能跑（纯 Python 兜底）
+- `/kwb stats` 显示向量条数与维度，`/kwb test` 分别展示词法与向量命中
+- 修复：重复重建时 contentless FTS5 表不允许 DELETE 的问题（改为兜底重建表）
+- 新增 `tests/test_semantic.py`（5 项，用合成向量，不依赖任何嵌入服务）
+
 ## v0.1.0 (2026-11-02)
 
 首个可用版本。
