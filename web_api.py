@@ -185,6 +185,11 @@ class ScinderBookWebAPI:
 
     # ---------------- 辅助 ----------------
 
+    @_guard("semantic/probe")
+    async def probe(self, **_kwargs) -> Any:
+        """点一下就知道嵌入服务（ollama 等）现在能不能用。"""
+        return _ok(await self.plugin.probe_embedding())
+
     @_guard("suggest")
     async def suggest(self, **_kwargs) -> Any:
         payload = await request.json(default={}) or {}
@@ -207,6 +212,7 @@ def register(plugin) -> None:
         ("entry/toggle", api.toggle, ["POST"], "启用/禁用词条"),
         ("folder/new", api.create_folder, ["POST"], "新建文件夹"),
         ("rebuild", api.rebuild, ["POST"], "重建索引与向量"),
+        ("semantic/probe", api.probe, ["POST"], "检测嵌入服务是否可用"),
         ("suggest", api.suggest, ["POST"], "从正文提取候选召回词"),
         ("status", api.status, ["GET"], "运行状态"),
     )
