@@ -25,6 +25,7 @@
 
 **管理页**
 
+- 新增「检测嵌入」按钮：真调一次 `get_embedding("ping")`（8 秒超时），返回维度/耗时或可读失败原因（`no_provider` / `provider_missing` / `call_failed` / `timeout` / `empty_vector`）；结果同时进顶栏 chip 与 toast。接口为 `semantic/probe`
 - 新增禁用开关：目录里每条都有「禁用 / 启用」（悬停显现），禁用的条目变灰+删除线、不召回不注入（常驻也停），状态写进 md 的 `frontmatter: disabled: true`，Obsidian 里能看到
 - 新增 `Catalog.set_disabled()` / `entry/toggle` 接口；禁用与启用都会重建索引
 - 新增自建文件夹：`Catalog.create_folder()` / `list_folders()` / `folder/new` 接口，侧栏「＋ 文件夹」（支持 `名/子名`），空文件夹也会显示，建完自动定位

@@ -181,6 +181,7 @@ git clone <本仓库地址> astrbot_plugin_scinderbook
 - **md 仍是唯一真源**：页面只是把它写回规范格式，索引和向量都是可重建的缓存，删掉重扫不影响内容
 - **只碰目录内的 `.md`**：路径必须是 `vault_dir` 下的相对路径且以 `.md` 结尾，`..`、绝对路径、无扩展名一律拒绝
 - 在 Obsidian 里改完上传，点右上角「重新扫描」即可刷新；保存 / 新建 / 删除 / 导入后会自动重建
+- **顶栏「检测嵌入」**：真的调一次 `get_embedding("ping")`（8 秒超时），成功显示「可用 · 维度 · 耗时」，失败给出可读原因（没填 `embedding_provider_id` / 提供商里找不到 / 连接被拒 / 超时 / 空向量）。用来确认 ollama 之类的嵌入服务当前有没有起来，不用开终端；它不会写库、不改配置
 
 > 实现注记：插件页面跑在仪表盘的 sandbox iframe 里（`allow-scripts allow-forms allow-downloads`，**没有** `allow-same-origin`），所以页面拿不到 cookie，`prompt()` / `confirm()` 也会被浏览器静默拦掉。因此本页所有请求都走宿主的 `AstrBotPluginPage.apiGet/apiPost` 桥接，所有弹窗都是页内自绘的，没有用原生对话框。
 
