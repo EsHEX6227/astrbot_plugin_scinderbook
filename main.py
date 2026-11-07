@@ -223,6 +223,83 @@ class ScinderBookPlugin(Star):
     def _semantic_on(self) -> bool:
         return bool(self._c("semantic_enabled", False)) and self._embed_provider() is not None
 
+    async def probe_embedding(self, timeout: float = 8.0) -> dict:
+        """真的打一次嵌入接口，用来确认 ollama 之类的服务有没有起来。
+
+        页面上点一下就是调它：成功给出维度与耗时，失败给出可读原因。
+        不写库、不改配置，纯探测。
+        """
+        pid = str(self._c("embedding_provider_id", "") or "").strip()
+        base = {
+            "provider": pid,
+            "semantic_enabled": bool(self._c("semantic_enabled", False)),
+            "config_ok": bool(pid),
+        }
+        if not pid:
+            return {
+                **base,
+                "ok": False,
+                "reason": "no_provider",
+                "message": "插件配置里还没填 embedding_provider_id",
+            }
+        prov = self._embed_provider()
+        if prov is None:
+            return {
+                **base,
+                "ok": False,
+                "reason": "provider_missing",
+                "message": f"找不到嵌入提供商「{pid}」（提供商里没有它，或不是嵌入模型）",
+            }
+
+        started = time.monotonic()
+        try:
+            vector = await asyncio.wait_for(prov.get_embedding("ping"), timeout=timeout)
+        except asyncio.TimeoutError:
+            return {
+                **base,
+                "ok": False,
+                "reason": "timeout",
+                "ms": int((time.monotonic() - started) * 1000),
+                "message": f"{timeout:.0f} 秒没有响应，服务可能没起或者模型还在加载",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                **base,
+                "ok": False,
+                "reason": "call_failed",
+                "ms": int((time.monotonic() - started) * 1000),
+                "message": f"{type(exc).__name__}: {str(exc)[:240]}",
+            }
+
+        elapsed = int((time.monotonic() - started) * 1000)
+        dim = len(vector or [])
+        if not dim:
+            return {
+                **base,
+                "ok": False,
+                "reason": "empty_vector",
+                "ms": elapsed,
+                "message": "接口通了但返回了空向量",
+            }
+        index = self._index
+        cached = 0
+        cached_dim = 0
+        if index is not None:
+            try:
+                cached = index.embeddings_count()
+                cached_dim = index.get_vector_dim()
+            except Exception:  # noqa: BLE001
+                cached = cached_dim = 0
+        return {
+            **base,
+            "ok": True,
+            "dim": dim,
+            "ms": elapsed,
+            "vectors": cached,
+            "vector_dim": cached_dim,
+            "message": f"可用：{dim} 维，{elapsed} ms",
+        }
+
     async def _rebuild_embeddings(self) -> None:
         if not bool(self._c("semantic_enabled", False)):
             return
